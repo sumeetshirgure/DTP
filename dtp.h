@@ -7,4 +7,6 @@
 
 #include "gate.h"
 
+#include "buffer.h"
+
 #endif
