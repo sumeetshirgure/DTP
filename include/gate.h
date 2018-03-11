@@ -39,7 +39,7 @@ int init_dtp_server (dtp_server*, port_t);
    Listen for client.
    Once connection is established, allocate resources.
  */
-int dtp_listen (dtp_server*, const char*, port_t);
+int dtp_listen (dtp_server*, char*, port_t*);
 
 
 /* -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- */
@@ -72,5 +72,10 @@ int dtp_recv (struct dtp_gate*, const void*, size_t, size_t*);
 
 
 /* -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- */
+
+/**
+   Close connection.
+ */
+int close_dtp_gate(struct dtp_gate*);
 
 #endif
