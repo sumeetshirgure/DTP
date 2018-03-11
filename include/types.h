@@ -24,6 +24,9 @@ typedef struct packet_t {
   byte_t data[PAYLOAD];		/* <=1024 byte data. */
 } packet_t;
 
+/* Gate typedefs. */
+typedef unsigned short port_t;	/* IPv4 port type. */
+
 
 
 #endif
