@@ -12,7 +12,7 @@ client : Client.c dtp
 
 dtp : libdtp.so
 
-libdtp.so : $(LIB)/libgate.o $(LIB)/libbuffer.o
+libdtp.so : $(LIB)/libgate.o $(LIB)/libbuffer.o $(LIB)/libpacket.o
 	gcc -shared -fPIC $^ -Wl,-soname,libdtp.so -o $(LIB)/libdtp.so
 
 $(LIB)/libgate.o : $(SRC)/gate.c $(INC)/gate.h
@@ -20,6 +20,9 @@ $(LIB)/libgate.o : $(SRC)/gate.c $(INC)/gate.h
 
 $(LIB)/libbuffer.o : $(SRC)/buffer.c $(INC)/buffer.h
 	gcc -c -fPIC -I$(INC) $(SRC)/buffer.c -o $(LIB)/libbuffer.o
+
+$(LIB)/libpacket.o : $(SRC)/packet.c $(INC)/packet.h
+	gcc -c -fPIC -I$(INC) $(SRC)/packet.c -o $(LIB)/libpacket.o
 
 clean :
 	rm -f lib/* server client
