@@ -1,6 +1,6 @@
 #include "gate.h"
 
-#include "string.h"		/* memset */
+#include <string.h>		/* memset */
 #include <arpa/inet.h>		/* inet_aton */
 
 int init_dtp_server (dtp_server* server, port_t port_no) {
@@ -37,13 +37,8 @@ int init_dtp_client (dtp_client* client, const char* hostname, port_t port_no) {
   int stat = 0;
 
   /* Create socket. */
-  stat = (client->socket) = socket(AF_INET, SOCK_DGRAM, 0);
-  if( stat < 0 )
-    return -1;
-
-  /* Get socket name. */
-  stat = getsockname(client->socket, (struct sockaddr*) &(client->self), NULL);
-  if( stat < 0 )
+  (client->socket) = socket(AF_INET, SOCK_DGRAM, 0);
+  if( (client->socket) < 0 )
     return -1;
 
   /* Create remote server address. */

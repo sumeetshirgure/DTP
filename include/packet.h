@@ -7,7 +7,7 @@
 /**
    Send a packet.
  */
-int send_pkt (struct dtp_gate*, packet_t *);
+int send_pkt (struct dtp_gate*, const packet_t *);
 
 /**
    Receive a packet.

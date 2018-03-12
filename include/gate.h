@@ -47,7 +47,6 @@ int dtp_listen (dtp_server*, char*, port_t*);
 /**
    Create a socket.
    Initialize client with the address of the server to connect to.
-   The self address field is filled by calling getsockname on the created socket.
  */
 int init_dtp_client (dtp_client*, const char*, port_t);
 

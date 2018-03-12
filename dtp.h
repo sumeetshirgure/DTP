@@ -9,4 +9,6 @@
 
 #include "buffer.h"
 
+#include "packet.h"
+
 #endif
