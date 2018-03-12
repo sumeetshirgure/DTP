@@ -8,7 +8,6 @@
 #include <time.h>		/* time() */
 
 #include <stdlib.h>		/* rand() */
-#include <errno.h>
 
 int init_dtp_server (dtp_server* server, port_t port_no) {
   int stat = 0;
@@ -84,7 +83,8 @@ int dtp_listen (dtp_server * server, char *hostname, port_t *port_no) {
     if( stat < 0 )
       return -1;
 
-    if( recv_pkt(server, &synpack) < 0 )
+    stat = detect_pkt(server, &synpack);
+    if( stat != RCV_OK )
       return -1;		/* Non timeout error. */
 
     if( synpack.flags & SYN ) {
@@ -98,23 +98,29 @@ int dtp_listen (dtp_server * server, char *hostname, port_t *port_no) {
     server->seqno = rand();
 
     make_pkt(&synpack, server->seqno, server->ackno, 0, 0, 0, SYN|ACK, NULL);
-    timeout.tv_sec = 0; timeout.tv_usec = 0;
+    if( send_pkt(server, &synpack) < 0 )
+      continue;			/* Failure. */
+
+    /* Set 1 second timeout. */
+    timeout.tv_sec = 1; timeout.tv_usec = 0;
     stat = setsockopt(server->socket, SOL_SOCKET, SO_RCVTIMEO,
 		      &timeout, sizeof(struct timeval));
     if( stat < 0 )
       return -1;
-    if( recv_pkt(server, &synpack) < 0 ) {
-      if( errno != EAGAIN && errno != EWOULDBLOCK )
-	return -1;
-      continue;
+
+    stat = recv_pkt(server, &synpack);
+    if( stat == RCV_TIMEOUT || stat == RCV_WRHOST ) {
+      continue;			/* Reset connection. */
+      /* If two clients simultaneuosly try to send SYN requests
+	 to DTP server, neither of them will get a connection. */
+    } else if( stat != RCV_OK ) {
+      return -1;		/* Other error. */
     }
+
     if( synpack.flags & ACK ) {
-      if( synpack.ack != server->seqno ) {
-	continue;
-      }
+      if( synpack.ack != server->seqno )
+	continue;		/* Ignore. */
       break;
-    } else {
-      continue;
     }
   }
 
@@ -132,6 +138,12 @@ int dtp_listen (dtp_server * server, char *hostname, port_t *port_no) {
     return -1;
 
   server->status = CONN;
+
+  char * ret = inet_ntoa((server->addr).sin_addr);
+  ssize_t buflen = strlen(ret);
+  memcpy(hostname, ret, buflen);
+
+  *port_no = ntohs((server->addr).sin_port);
 
   return 0;
 }
@@ -163,7 +175,7 @@ int dtp_connect (dtp_client* client) {
   if( send_pkt(client, &synpack) < 0 )
     return -1;
 
-  if( recv_pkt(client, &synpack) < 0 || !(synpack.flags & ACK) )
+  if( recv_pkt(client, &synpack) != RCV_OK || !(synpack.flags & ACK) )
     return -1;
 
   if( client->seqno != synpack.ack ) /* Validate sent sequence number. */
@@ -176,6 +188,12 @@ int dtp_connect (dtp_client* client) {
     return -1;
 
   client->status = CONN;
+
+  /* Set self address. */
+  socklen_t socklen = sizeof(struct sockaddr_in*);
+  getsockname(client->socket,
+	      (struct sockaddr*) &(client->self),
+	      &socklen);
 
   return 0;
 }
