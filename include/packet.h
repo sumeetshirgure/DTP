@@ -18,6 +18,6 @@ int recv_pkt (struct dtp_gate*, packet_t *);
    Create a packet from the data buffer.
    Assumes write length < PAYLOAD.
  */
-int make_pkt (packet_t *, seq_t, wptr_t, len_t, len_t, flag_t, const void*);
+int make_pkt (packet_t *, seq_t, seq_t, wptr_t, len_t, len_t, flag_t, const void*);
 
 #endif

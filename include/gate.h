@@ -5,6 +5,9 @@
 
 #include <netinet/ip.h>		/* struct sockaddr_in. */
 
+#define IDLE 0x01
+#define CONN 0x02
+
 /**
   dtp_server and dtp_client (also called "gates")
   are encapsulations for a socket coupled with an address.
@@ -17,6 +20,7 @@ struct dtp_gate {
   struct sockaddr_in addr;	/* Remote address. */
 
   /* TODO : add buffers and threads.  */
+  seq_t seqno, ackno;		/* Sequence numbers. */
 };
 
 typedef struct dtp_gate dtp_server;

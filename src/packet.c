@@ -29,16 +29,19 @@ int recv_pkt (struct dtp_gate* gate, packet_t *packet) {
 
 int make_pkt (packet_t *packet,
 	      seq_t seq,
+	      seq_t ack,
 	      wptr_t wptr,
 	      len_t len,
 	      len_t wsz,
 	      flag_t flags,
 	      const void* buffer) {
   packet->seq = seq;
+  packet->ack = ack;
   packet->wptr = wptr;
   packet->len = len;
   packet->wsz = wsz;
   packet->flags = flags;
-  memcpy(packet->data, (byte_t*) buffer, len);
+  if( len > 0 )
+    memcpy(packet->data, (byte_t*) buffer, len);
   return 0;
 }
