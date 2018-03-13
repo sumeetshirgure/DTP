@@ -9,10 +9,11 @@
   Thread safe bounded packet buffer.
  */
 typedef struct dtp_buff {
-  packet_t *buff;			/* Packet buffer. */
-  size_t buff_in, buff_out, buff_size;	/* Pointers */
-  pthread_mutex_t rd_mtx, wr_mtx;	/* POSIX thread mutexes. */
-  pthread_cond_t szc, rmc;		/* POSIX condition variables. */
+  packet_t *buff;		/* Packet buffer. */
+  size_t buff_size, max_size;	/* Current and maxmimum sizes. */
+  size_t inptr, outptr;		/* Pointers to special locations. */
+  pthread_mutex_t mtx;		/* POSIX thread mutexes. */
+  pthread_cond_t szc;		/* POSIX condition variable. */
 } dtp_buff;
 
 /**
