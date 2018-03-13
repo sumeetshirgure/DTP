@@ -4,7 +4,6 @@
 #include "types.h"
 
 #include <pthread.h>
-#include <semaphore.h>
 
 /**
   Thread safe bounded packet buffer.
@@ -13,7 +12,7 @@ typedef struct dtp_buff {
   packet_t *buff;			/* Packet buffer. */
   size_t buff_in, buff_out, buff_size;	/* Pointers */
   pthread_mutex_t rd_mtx, wr_mtx;	/* POSIX thread mutexes. */
-  sem_t size_sem, rem_sem;		/* POSIX semaphores. */
+  pthread_cond_t szc, rmc;		/* POSIX condition variables. */
 } dtp_buff;
 
 /**
