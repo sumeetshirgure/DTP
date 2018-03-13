@@ -9,6 +9,11 @@
 
 #include <stdlib.h>		/* rand() */
 
+const size_t MAXWIND = 1024;	/* 1 Kibipackets (1 MiB buffer.) */
+
+/* Resources to allocate once a connection is established. */
+int setup_gate (struct dtp_gate* gate);
+
 int init_dtp_server (dtp_server* server, port_t port_no) {
   int stat = 0;
 
@@ -197,5 +202,49 @@ int dtp_connect (dtp_client* client) {
 	      (struct sockaddr*) &(client->self),
 	      &socklen);
 
+  return 0;
+}
+
+/* Handles sending of packets. */
+static void * sender_daemon (void * arg) {
+  struct dtp_gate* gate = (struct dtp_gate *) arg;
+  pthread_exit(NULL);
+}
+
+/* Handles receving of packets. */
+static void * receiver_daemon (void * arg) {
+  struct dtp_gate* gate = (struct dtp_gate *) arg;
+  pthread_exit(NULL);
+}
+
+/* Handles flow and congestion control. */
+static void * controller_daemon (void * arg) {
+  struct dtp_gate* gate = (struct dtp_gate *) arg;
+  pthread_exit(NULL);
+}
+
+/* Sets up buffers and creates threads. */
+int setup_gate (struct dtp_gate* gate) {
+  init_dtp_buff(&(gate->inbuf), MAXWIND);
+  init_dtp_buff(&(gate->outbuf), MAXWIND);
+
+  /* Initialize sender daemon. */
+  pthread_create(&(gate->snd_dmn), NULL, &sender_daemon, gate);
+
+  /* Initialize receiver deamon. */
+  // pthread_create(&(gate->rcv_dmn), NULL, receiver_daemon, gate);
+
+  /* Initialize controller deamon. */
+  // pthread_create(&(gate->pkt_dmn), NULL, controller_daemon, gate);
+
+  return 0;
+}
+
+int close_dtp_gate (struct dtp_gate * gate) {
+  destroy_dtp_buff(&(gate->inbuf));
+  destroy_dtp_buff(&(gate->outbuf));
+  pthread_cancel(gate->snd_dmn);
+  // pthread_cancel(gate->rcv_dmn);
+  // pthread_cancel(gate->pkt_dmn);
   return 0;
 }

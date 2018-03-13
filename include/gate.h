@@ -2,6 +2,11 @@
 #define _GATE_H
 
 #include "types.h"
+#include "buffer.h"
+
+#include <pthread.h>		/* POSIX thread library. */
+#include <sys/time.h>
+#include <time.h>
 
 #include <netinet/ip.h>		/* struct sockaddr_in. */
 
@@ -14,13 +19,27 @@
   They represent a dtp connection.
 */
 struct dtp_gate {
-  int status;			/* State of this gate. */
+  int status;			/* State of this gate. IDLE / CONN. */
   int socket;			/* Socket file descriptor for this gate. */
   struct sockaddr_in self;	/* Self address. */
   struct sockaddr_in addr;	/* Remote address. */
 
-  /* TODO : add buffers and threads.  */
   seq_t seqno, ackno;		/* Sequence numbers. */
+  dtp_buff inbuf, outbuf;	/* Input and output buffers. */
+
+  /* Connection state. */
+  struct timespec ackstamp;	/* Timestamp of last acknowledged packet. */
+  pthread_mutex_t tm_mtx;	/* Timestamp mutex guard. */
+  pthread_cond_t tm_cv;		/* Timestamp semaphore. */
+
+  size_t sndptr, WND, ssth;	/* Windowing variables / threshold. */
+  pthread_mutex_t wnd_mtx;	/* Packet window mutex guard. */
+  pthread_cond_t wnd_cv;	/* Packet window semaphore. */
+
+  pthread_t snd_dmn;	 /* Thread handling outgoing packet buffer I/O. */
+  pthread_t rcv_dmn;	 /* Thread handling incoming packet buffer I/O. */
+  pthread_t pkt_dmn;	 /* Thread handling packet flow and congestion parameters. */
+  /* All daemons have the address of the gate as the pthread argument. */
 };
 
 typedef struct dtp_gate dtp_server;
