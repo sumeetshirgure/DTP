@@ -94,7 +94,9 @@ int dtp_listen (dtp_server * server, char *hostname, port_t *port_no) {
     }
 
     /* Initial sequence number. */
-    srand(time(NULL));
+    srand(time(NULL) ^
+	  (server->self).sin_addr.s_addr ^
+	  (server->self).sin_port);
     server->seqno = rand();
 
     make_pkt(&synpack, server->seqno, server->ackno, 0, 0, 0, SYN|ACK, NULL);
