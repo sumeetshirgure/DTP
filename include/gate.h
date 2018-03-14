@@ -23,23 +23,34 @@ struct dtp_gate {
   struct sockaddr_in self;	/* Self address. */
   struct sockaddr_in addr;	/* Remote address. */
 
-  seq_t seqno, ackno;		/* Sequence numbers. */
-
-  /* TODO : add specialized sender and receiver buffers. */
-  /* Also add acknowledgement metadata. */
-
   /* Connection state. */
-  struct timespec ackstamp;	/* Timestamp of last acknowledged packet. */
+  struct timespec ackstamp;	/* Timestamp. */
   pthread_mutex_t tm_mtx;	/* Timestamp mutex guard. */
   pthread_cond_t tm_cv;		/* Timestamp semaphore. */
 
-  size_t sndptr, WND, ssth;	/* Windowing variables / threshold. */
-  pthread_mutex_t wnd_mtx;	/* Packet window mutex guard. */
-  pthread_cond_t wnd_cv;	/* Packet window semaphore. */
+  /* Sequence numbers. */
+  seq_t seqno, sndno;		/* Sent sequence numbers. */
+  seq_t ackno, ackfr;		/* Acknowledgement metadata. */
 
-  pthread_t snd_dmn;	 /* Thread handling outgoing packet buffer I/O. */
-  pthread_t rcv_dmn;	 /* Thread handling incoming packet buffer I/O. */
-  pthread_t pkt_dmn;	 /* Thread handling packet flow and congestion parameters. */
+  /* Packet buffers. */
+  packet_t *inbuf, *outbuf;	 /* Incoming / outgoing data. */
+
+  /* Outgoing data flow control. */
+  size_t outbeg, outsnd, outend; /* 3 pointers to outbuf. */
+  size_t WND, AXW, SSTH;	/* Windowing variables / threshold. */
+  pthread_mutex_t outbuf_mtx;	/* Guards out<var> */
+  pthread_cond_t outbuf_var;	/* Guards out<var> */
+
+  /* Incoming data flow control. */
+  byte_t *rcvf;			 /* Received flags. */
+  size_t inbeg, inend;		 /* Pointers to inbuf. */
+  pthread_mutex_t inbuf_mtx;	 /* Guards in<var> */
+  pthread_cond_t inbuf_var;	 /* Guards in<var> */
+
+  pthread_t snd_dmn;	 /* Thread handling outgoing packet I/O. */
+  pthread_t rcv_dmn;	 /* Thread handling incoming packet I/O. */
+  pthread_t tmo_dmn;	 /* Thread handling timeout. */
+
   /* All daemons have the address of the gate as the pthread argument. */
 };
 
@@ -88,10 +99,10 @@ int dtp_send (struct dtp_gate*, const void*, size_t);
 
 /**
    Recieve data from this gate (either server or client.)
-   Read a block of data smaller than the given size.
-   Returns the actual size of data read. (Ignores last argument if NULL.)
+   Waits for sender to send at least size bytes.
+   Returns once all bytes have been read.
  */
-int dtp_recv (struct dtp_gate*, const void*, size_t, size_t*);
+int dtp_recv (struct dtp_gate*, void*, size_t);
 
 
 /* -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- */
