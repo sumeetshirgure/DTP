@@ -155,9 +155,7 @@ int dtp_listen (dtp_server * server, char *hostname, port_t *port_no) {
   *port_no = ntohs((server->addr).sin_port);
 
   /* Set up gate resources. */
-  setup_gate(server);
-
-  return 0;
+  return setup_gate(server);
 }
 
 int dtp_connect (dtp_client* client) {
@@ -222,9 +220,7 @@ int dtp_connect (dtp_client* client) {
     return -1;
 
   /* Set up gate resources. */
-  setup_gate(client);
-
-  return 0;
+  return setup_gate(client);
 }
 
 /**
@@ -326,11 +322,13 @@ static void * timeout_daemon (void * arg) {
     size_t sndsize = (gate->outsnd + MXW - gate->outbeg)%MXW;
     size_t bufsize = (gate->outend + MXW - gate->outbeg)%MXW;
     /* Wait till entire window is sent. */
-    while( sndsize < gate->WND && sndsize < bufsize ) {
+    while( bufsize == 0 ||
+	   sndsize < gate->WND && sndsize < bufsize ) {
       pthread_cond_wait(&(gate->outbuf_var), &(gate->outbuf_mtx));
       sndsize = (gate->outsnd + MXW - gate->outbeg)%MXW;
       bufsize = (gate->outend + MXW - gate->outbeg)%MXW;
     }
+    pthread_mutex_lock(&(gate->tm_mtx));
     timeout = gate->ackstamp;
     timeout.tv_sec += 1;	/* Set 1 second timeout. */
     int stat = pthread_cond_timedwait(&(gate->tm_cv),
@@ -340,6 +338,8 @@ static void * timeout_daemon (void * arg) {
       /* Trigger timeout. */
       gate->SSTH = (gate->SSTH + 1) >> 1; /* Halve ssthresh. */
       gate->WND = 1;		/* Set current window to 1 packet. */
+    } else {
+      pthread_mutex_unlock(&(gate->tm_mtx));
     }
     pthread_mutex_unlock(&(gate->outbuf_mtx));
   }
@@ -378,23 +378,30 @@ int setup_gate (struct dtp_gate* gate) {
   stat = pthread_cond_init(&(gate->inbuf_var), NULL);
   if( stat != 0 )
     return stat;
+  stat = pthread_mutex_init(&(gate->tm_mtx), NULL);
+  if( stat != 0 )
+    return stat;
+  stat = pthread_cond_init(&(gate->tm_cv), NULL);
+  if( stat != 0 )
+    return stat;
   /* Initialize sender daemon. */
-  stat = pthread_create(&(gate->snd_dmn), NULL,
-			&sender_daemon, gate);
+  stat = pthread_create(&(gate->snd_dmn), NULL, &sender_daemon, gate);
   if( stat != 0 )
     return stat;
   /* Initialize receiver deamon. */
-  // pthread_create(&(gate->rcv_dmn), NULL, receiver_daemon, gate);
+  stat = pthread_create(&(gate->rcv_dmn), NULL, &receiver_daemon, gate);
+  if( stat != 0 )
+    return stat;
   /* Initialize controller deamon. */
-  // pthread_create(&(gate->tmo_dmn), NULL, controller_daemon, gate);
-  return 0;
+  stat = pthread_create(&(gate->tmo_dmn), NULL, &timeout_daemon, gate);
+  return stat;
 }
 
 /* Frees buffers and closes connection. */
 int close_dtp_gate (struct dtp_gate * gate) {
   pthread_cancel(gate->snd_dmn);
-  // pthread_cancel(gate->rcv_dmn);
-  // pthread_cancel(gate->tmo_dmn);
+  pthread_cancel(gate->rcv_dmn);
+  pthread_cancel(gate->tmo_dmn);
   /* Destroy buffers. */
   free(gate->inbuf);
   free(gate->outbuf);
@@ -404,6 +411,8 @@ int close_dtp_gate (struct dtp_gate * gate) {
   pthread_cond_destroy(&(gate->outbuf_var));
   pthread_mutex_destroy(&(gate->inbuf_mtx));
   pthread_cond_destroy(&(gate->inbuf_var));
+  pthread_mutex_destroy(&(gate->tm_mtx));
+  pthread_cond_destroy(&(gate->tm_cv));
   gate->status = IDLE;
   return 0;
 }

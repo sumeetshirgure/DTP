@@ -37,7 +37,6 @@ int main (int argc, char *argv[]) {
   char text[1<<10];
 
   pthread_mutex_lock(&(client.inbuf_mtx));
-
   while( (client.inend + 1024 - client.inbeg)%1024 == 0 )
     pthread_cond_wait(&(client.inbuf_var), &(client.inbuf_mtx));
   size_t len = client.inbuf[client.inbeg].len;

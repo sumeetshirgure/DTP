@@ -6,6 +6,8 @@
 #include <sys/socket.h>
 #include <errno.h>
 
+#include <stdio.h>
+
 /* Returns nonzero if two addresses are different. */
 int validate_address (const struct sockaddr_in *addr0,
 		      const struct sockaddr_in *addr1) {
@@ -26,6 +28,10 @@ int send_pkt (struct dtp_gate* gate, const packet_t *packet) {
 			0,
 			(const struct sockaddr*) &(gate->addr),
 			socklen);
+  fprintf(stderr, "Packet sent : <%u/%u, %u>\n",
+	  (packet->len > 0 ? packet->seq : 0),
+	  (packet->flags & ACK) ? packet->ack : 0, packet->len);
+  fflush(stderr);
   return stat < 0 ? -1 : 0;
 }
 
@@ -44,6 +50,10 @@ int recv_pkt (struct dtp_gate* gate, packet_t *packet) {
     return RCV_TIMEOUT;
   }
   stat = validate_address(&recv_addr, &(gate->addr));
+  fprintf(stderr, "Packet received : <%u/%u, %u>\n",
+	  (packet->len > 0 ? packet->seq : 0),
+	  (packet->flags & ACK) ? packet->ack : 0, packet->len);
+  fflush(stderr);
   return stat != 0 ? RCV_WRHOST : RCV_OK;
 }
 
