@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <string.h>
+
 int main (int argc, char *argv[]) {
   if( argc != 2 ) {
     fprintf(stderr, "Usage: %s <server_port>\n", argv[0]);
@@ -28,7 +30,25 @@ int main (int argc, char *argv[]) {
   printf("(%d) :: %s:%u\n",  server.status, client_ip, client_port);
   printf("InitSeq <Self : %u, Remote : %u>\n", server.seqno, server.ackno);
 
-  pause();
+  char text[1<<7];
+  scanf("%[^\n]", text); getchar();
+  ssize_t texlen = strlen(text);
+
+  pthread_mutex_lock(&(server.outbuf_mtx));
+
+  make_pkt(&(server.outbuf[server.outend]),
+	   server.seqno,
+	   0,
+	   server.outend,
+	   texlen,
+	   1024,
+	   0,
+	   text);
+  server.outbeg = (server.outbeg + 1)%1024;
+
+  pthread_mutex_unlock(&(server.outbuf_mtx));
+
+  close_dtp_gate(&server);
 
   return 0;
 }

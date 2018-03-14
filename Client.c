@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <string.h>
+
 #include <arpa/inet.h>
 
 int main (int argc, char *argv[]) {
@@ -32,7 +34,22 @@ int main (int argc, char *argv[]) {
 	 inet_ntoa(client.addr.sin_addr), ntohs(client.addr.sin_port));
   printf("InitSeq <Self : %u, Remote : %u>\n", client.seqno, client.ackno);
 
-  pause();
+  char text[1<<10];
+
+  pthread_mutex_lock(&(client.inbuf_mtx));
+
+  while( (client.inend + 1024 - client.inbeg)%1024 == 0 )
+    pthread_cond_wait(&(client.inbuf_var), &(client.inbuf_mtx));
+  size_t len = client.inbuf[client.inbeg].len;
+  memcpy(text, client.inbuf[client.inbeg].data, len);
+  client.inbeg = (client.inbeg + 1) % 1024;
+  pthread_mutex_unlock(&(client.inbuf_mtx));
+
+  text[len] = 0;
+
+  printf("Received : [%s]\n", text);
+
+  close_dtp_gate(&client);
 
   return 0;
 }
