@@ -2,7 +2,6 @@
 #define _GATE_H
 
 #include "types.h"
-#include "buffer.h"
 
 #include <pthread.h>		/* POSIX thread library. */
 #include <sys/time.h>
@@ -25,7 +24,9 @@ struct dtp_gate {
   struct sockaddr_in addr;	/* Remote address. */
 
   seq_t seqno, ackno;		/* Sequence numbers. */
-  dtp_buff inbuf, outbuf;	/* Input and output buffers. */
+
+  /* TODO : add specialized sender and receiver buffers. */
+  /* Also add acknowledgement metadata. */
 
   /* Connection state. */
   struct timespec ackstamp;	/* Timestamp of last acknowledged packet. */

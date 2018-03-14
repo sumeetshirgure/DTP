@@ -9,8 +9,6 @@
 
 #include <stdlib.h>		/* rand() */
 
-const size_t MAXWIND = 1024;	/* 1 Kibipackets (1 MiB buffer.) */
-
 /* Resources to allocate once a connection is established. */
 int setup_gate (struct dtp_gate* gate);
 
@@ -225,8 +223,7 @@ static void * controller_daemon (void * arg) {
 
 /* Sets up buffers and creates threads. */
 int setup_gate (struct dtp_gate* gate) {
-  init_dtp_buff(&(gate->inbuf), MAXWIND);
-  init_dtp_buff(&(gate->outbuf), MAXWIND);
+  /* Initialize buffers. */
 
   /* Initialize sender daemon. */
   pthread_create(&(gate->snd_dmn), NULL, &sender_daemon, gate);
@@ -241,10 +238,11 @@ int setup_gate (struct dtp_gate* gate) {
 }
 
 int close_dtp_gate (struct dtp_gate * gate) {
-  destroy_dtp_buff(&(gate->inbuf));
-  destroy_dtp_buff(&(gate->outbuf));
+  /* Destroy buffers. */
+
   pthread_cancel(gate->snd_dmn);
   // pthread_cancel(gate->rcv_dmn);
   // pthread_cancel(gate->pkt_dmn);
+  gate->status = IDLE;
   return 0;
 }

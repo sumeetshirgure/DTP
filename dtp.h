@@ -12,8 +12,6 @@
 
 #include "gate.h"
 
-#include "buffer.h"
-
 #include "packet.h"
 
 #endif
