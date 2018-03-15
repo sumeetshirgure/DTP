@@ -33,25 +33,10 @@ int main (int argc, char *argv[]) {
   char text[1<<7];
   scanf("%s", text);
   printf("Sending : %s\n", text);
-  size_t texlen = strlen(text), expeq = server.seqno + texlen;
 
-  pthread_mutex_lock(&(server.outbuf_mtx));
-  make_pkt(&(server.outbuf[server.outend]),
-	   server.seqno,
-	   0,
-	   server.outend,
-	   texlen,
-	   1024,
-	   0,
-	   text);
-  server.outend = (server.outend + 1)%1024;
-  pthread_cond_broadcast(&(server.outbuf_var));
-
-  printf("Pushed into buffer.n"); fflush(stdout);
-
-  while( server.seqno != expeq ) {
-    printf("<%u, %lu>\n", server.seqno, expeq); fflush(stdout);
-    pthread_cond_wait(&(server.outbuf_var), &(server.outbuf_mtx));
+  if( dtp_send(&server, text, 10) != 0 ) {
+    fprintf(stderr, "Error in dtp_send.\n");
+    return 1;
   }
 
   pthread_mutex_unlock(&(server.outbuf_mtx));

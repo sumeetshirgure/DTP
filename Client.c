@@ -35,14 +35,12 @@ int main (int argc, char *argv[]) {
   printf("InitSeq <Self : %u, Remote : %u>\n", client.seqno, client.ackno);
 
   char text[1<<10];
+  size_t len = 10;
 
-  pthread_mutex_lock(&(client.inbuf_mtx));
-  while( (client.inend + 1024 - client.inbeg)%1024 == 0 )
-    pthread_cond_wait(&(client.inbuf_var), &(client.inbuf_mtx));
-  size_t len = client.inbuf[client.inbeg].len;
-  memcpy(text, client.inbuf[client.inbeg].data, len);
-  client.inbeg = (client.inbeg + 1) % 1024;
-  pthread_mutex_unlock(&(client.inbuf_mtx));
+  if( dtp_recv(&client, text, len) != 0 ) {
+    fprintf(stderr, "Error in dtp_recv.\n");
+    return 1;
+  }
 
   text[len] = 0;
 

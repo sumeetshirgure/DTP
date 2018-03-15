@@ -321,7 +321,7 @@ static void * timeout_daemon (void * arg) {
     /* Wait for all packets of the window to be sent. */
     size_t sndsize = (gate->outsnd + MXW - gate->outbeg)%MXW;
     size_t bufsize = (gate->outend + MXW - gate->outbeg)%MXW;
-    /* Wait till entire window is sent. */
+    /* Wait till entire window (and at least one packet) is sent. */
     while( bufsize == 0 ||
 	   sndsize < gate->WND && sndsize < bufsize ) {
       pthread_cond_wait(&(gate->outbuf_var), &(gate->outbuf_mtx));
@@ -364,6 +364,7 @@ int setup_gate (struct dtp_gate* gate) {
 				   Used to implement congestion avoidance. */
   gate->sndno = gate->seqno;	/* Sent sequence numbers. */
   gate->ackfr = 0;		/* Frequency of last acked sequence number. */
+  gate->byte_offset = 0;	/* Byte offset. */
   int stat;
   /* Initialize mutexes and semaphores. */
   stat = pthread_mutex_init(&(gate->outbuf_mtx), NULL);
@@ -389,16 +390,18 @@ int setup_gate (struct dtp_gate* gate) {
   if( stat != 0 )
     return stat;
   /* Initialize receiver deamon. */
-  stat = pthread_create(&(gate->rcv_dmn), NULL, &receiver_daemon, gate);
+  stat = pthread_create(&(gate->rcv_dmn), NULL, receiver_daemon, gate);
   if( stat != 0 )
     return stat;
   /* Initialize controller deamon. */
-  stat = pthread_create(&(gate->tmo_dmn), NULL, &timeout_daemon, gate);
+  stat = pthread_create(&(gate->tmo_dmn), NULL, timeout_daemon, gate);
   return stat;
 }
 
 /* Frees buffers and closes connection. */
 int close_dtp_gate (struct dtp_gate * gate) {
+  /* TODO : Add FIN / FIN|ACK / ACK closure with timeout limit. */
+  /* Stop daemons. */
   pthread_cancel(gate->snd_dmn);
   pthread_cancel(gate->rcv_dmn);
   pthread_cancel(gate->tmo_dmn);
@@ -423,9 +426,36 @@ int close_dtp_gate (struct dtp_gate * gate) {
    been acknowledged by the receiver.
  */
 int dtp_send(struct dtp_gate* gate, const void* data, size_t len) {
-  const void * end = data + len;
+  const byte_t * beg = (const byte_t *)data,
+    * end = beg + len; /* Convert to byte pointers. */
+  size_t expseq;       /* Expected sequence numbers. */
+  while( data != end ) {
+    size_t blk = end-beg;
+    if( blk > PAYLOAD )
+      blk = PAYLOAD;
+    pthread_mutex_lock(&(gate->outbuf_mtx));
+    /* Wait for space on buffer. */
+    while( (gate->outend + MXW - gate->inbeg)%MXW >= MXW - 1 )
+      pthread_cond_wait(&(gate->outbuf_var), &(gate->outbuf_mtx));
+    make_pkt((gate->outbuf)+(gate->outend),
+	     gate->sndno,
+	     0,
+	     gate->outend,
+	     blk,
+	     0,
+	     0,
+	     data);
+    gate->sndno += blk;
+    expseq = gate->sndno;
+    gate->outend = (gate->outend + 1)%MXW;
+    pthread_cond_broadcast(&(gate->outbuf_var));
+    pthread_mutex_unlock(&(gate->outbuf_mtx));
+    beg += blk;
+  }
+  /* Wait for ackets. */
   pthread_mutex_lock(&(gate->outbuf_mtx));
-  /*  */
+  while( gate->seqno != expseq )
+    pthread_cond_wait(&(gate->outbuf_var), &(gate->outbuf_mtx));
   pthread_mutex_unlock(&(gate->outbuf_mtx));
   return 0;
 }
@@ -435,5 +465,26 @@ int dtp_send(struct dtp_gate* gate, const void* data, size_t len) {
    bytes. Returns once all bytes have been read.
  */
 int dtp_recv(struct dtp_gate* gate, void* data, size_t size) {
+  byte_t * beg = (byte_t *) data, * end = beg + size;
+  while( beg != end ) {
+    pthread_mutex_lock(&(gate->inbuf_mtx));
+    while( (gate->inend + MXW - gate->inbeg)%MXW == 0 )
+      pthread_cond_wait(&(gate->inbuf_var), &(gate->inbuf_mtx));
+    packet_t *pkt = (gate->inbuf) + (gate->inbeg);
+    size_t wr_len = end - beg, rem = (pkt->len - gate->byte_offset);
+    if( wr_len >= rem ) {
+      wr_len = rem;
+      memcpy(beg, pkt->data, wr_len); /* Write packet data. */
+      gate->rcvf[gate->inbeg] = 0; /* Clear bit. */
+      gate->inbeg = (gate->inbeg + 1)%MXW;
+      gate->byte_offset = 0;	/* Reset offset. */
+      pthread_cond_broadcast(&(gate->inbuf_var));
+    } else {
+      memcpy(beg, pkt->data, wr_len);
+      gate->byte_offset += wr_len;
+    }
+    beg += wr_len;
+    pthread_mutex_unlock(&(gate->inbuf_mtx));
+  }
   return 0;
 }
