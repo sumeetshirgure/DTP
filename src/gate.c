@@ -258,7 +258,8 @@ static void * receiver_daemon (void * arg) {
   struct dtp_gate* gate = (struct dtp_gate *) arg;
   packet_t packet;
   while( 1 ) {
-    recv_pkt(gate, &packet);
+    if( recv_pkt(gate, &packet) == RCV_WRHOST )
+      continue;
     if( packet.flags & ACK ) {
       pthread_mutex_lock(&(gate->outbuf_mtx));
       size_t ack = packet.ack;
