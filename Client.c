@@ -48,18 +48,24 @@ int main (int argc, char *argv[]) {
     perror("fopen");
     return 1;
   }
-  size_t filesize = get_filesize(argv[3]);
 
+  size_t filesize = get_filesize(argv[3]);
   if( dtp_send(&client, &filesize, sizeof(size_t)) != 0 ) {
     fprintf(stderr, "Error in dtp_send.\n");
     return 1;
   }
 
-  int temp;
-  printf("Received file sent : %lu\nContinue?", filesize);
-  scanf("%d", &temp);
+  printf("Sent file size : %lu\n", filesize);
 
-  const size_t BUFLEN = 1<<16;
+  size_t chksize;
+  if( dtp_recv(&client, &chksize, sizeof(size_t)) != 0 ) {
+    fprintf(stderr, "Error in dtp_recv.\n");
+    return 1;
+  }
+
+  printf("File size acked : %lu\n", chksize);
+
+  const size_t BUFLEN = 1<<10;
   char buff[BUFLEN];
   while( 1 ) {
     size_t bytes = fread(buff, 1, BUFLEN, file);

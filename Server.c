@@ -36,23 +36,28 @@ int main (int argc, char *argv[]) {
     return 1;
   }
 
-  int temp;
-  printf("Received file size : %lu\nContinue?", filesize);
-  scanf("%d", &temp);
+  printf("Received file size : %lu\n", filesize);
+
+  if( dtp_send(&server, &filesize, sizeof(size_t)) != 0 ) {
+    fprintf(stderr, "Error in dtp_send.\n");
+    return 1;
+  }
 
   size_t remsize = filesize;
   FILE* outfile = fopen("Outfile", "wb");
-  char buff[2000];
+
+  const size_t BUFLEN = 1<<10;
+  char buff[BUFLEN];
   while( remsize > 0 ) {
     size_t len = remsize;
-    if( len > 2000 ) len = 2000;
+    if( len > BUFLEN ) len = BUFLEN;
     if( dtp_recv(&server, buff, len) != 0 ) {
       fprintf(stderr, "Error in dtp_recv.\n");
       return 1;
     }
     fwrite(buff, 1, len, outfile);
     remsize -= len;
-    printf("Bytes remaining : %lu\n", remsize);
+    printf("Bytes remaining :\t%10lu\r", remsize);
     fflush(stdout);
   }
 

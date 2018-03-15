@@ -5,6 +5,7 @@
 #include <string.h>		/* memset */
 #include <arpa/inet.h>		/* inet_aton */
 
+#include <sys/time.h>		/* gettimeofday() */
 #include <time.h>		/* time(), clock_gettime */
 
 #include <stdlib.h>		/* rand() */
@@ -242,14 +243,11 @@ static void * sender_daemon (void * arg) {
     }
     send_pkt(gate, (gate->outbuf) + (gate->outsnd));
     pthread_mutex_lock(&(gate->tm_mtx));
-    clock_gettime(CLOCK_MONOTONIC, &(gate->ackstamp));
+    gettimeofday(&(gate->ackstamp), NULL);
     pthread_cond_broadcast(&(gate->tm_cv));
     pthread_mutex_unlock(&(gate->tm_mtx));
     gate->outsnd = (gate->outsnd + 1) % MXW;
     pthread_cond_broadcast(&(gate->outbuf_var));
-    fprintf(stderr, "Sending [%u, %u, %u] (%u/%u) @%u\r",
-	    gate->outbeg, gate->outsnd, gate->outend,
-	    sndsize, bufsize, gate->WND); fflush(stderr);
     pthread_mutex_unlock(&(gate->outbuf_mtx));
   }
   pthread_exit(NULL);
@@ -264,9 +262,9 @@ static void * receiver_daemon (void * arg) {
     if( packet.flags & ACK ) {
       pthread_mutex_lock(&(gate->outbuf_mtx));
       size_t ack = packet.ack;
+      pthread_cond_broadcast(&(gate->tm_cv)); /* Signal ACK received. */
       if( (gate->seqno < ack && ack <= gate->sndno) ||
-	  !(gate->sndno < ack && ack <= gate->seqno) ) {
-	pthread_cond_broadcast(&(gate->tm_cv)); /* Signal ACK received. */
+	  !(gate->sndno < ack && ack <= gate->seqno) ) { /* Shift window. */
 	packet_t *pkt;
 	while( gate->seqno != ack ) {
 	  pkt = (gate->outbuf) + (gate->outbeg);
@@ -295,8 +293,6 @@ static void * receiver_daemon (void * arg) {
       if( gate->rcvf[packet.wptr] == 0 ) {
 	(gate->rcvf)[packet.wptr] = 1;
 	(gate->inbuf)[packet.wptr] = packet;
-	fprintf(stderr, "Accepting (%u, %u) @%u",
-		gate->inbeg, gate->inend, gate->WND); fflush(stderr);
 	/* Send cumulative acknowledgement packet. */
 	gate->ackno = packet.seq + packet.len;
 	packet_t *pkt;
@@ -335,21 +331,31 @@ static void * timeout_daemon (void * arg) {
       sndsize = (gate->outsnd + MXW - gate->outbeg)%MXW;
       bufsize = (gate->outend + MXW - gate->outbeg)%MXW;
     }
+    pthread_mutex_unlock(&(gate->outbuf_mtx));
     pthread_mutex_lock(&(gate->tm_mtx));
-    timeout = gate->ackstamp;
-    timeout.tv_sec += 1;	/* Set 1 second timeout. */
+    /* 1 second timeout */
+    timeout.tv_nsec = gate->ackstamp.tv_usec * 1000;
+    timeout.tv_sec = gate->ackstamp.tv_sec + 1;
+    // simultaneously release lock
     int stat = pthread_cond_timedwait(&(gate->tm_cv),
 				      &(gate->tm_mtx),
 				      &timeout);
-    if( stat != 0 && errno == ETIMEDOUT ) {
+    pthread_mutex_unlock(&(gate->tm_mtx));
+    if(stat == ETIMEDOUT) {
+      fprintf(stderr, "Timeout detected <%lu, %lu, %lu> (%lu | %lu)\n",
+	      gate->outbeg, gate->outsnd, gate->outend,
+	      gate->WND, gate->SSTH);
+
+      pthread_mutex_lock(&(gate->outbuf_mtx));
       /* Trigger timeout. */
       gate->SSTH = (gate->SSTH + 1) >> 1; /* Halve ssthresh. */
       gate->WND = 1;		/* Set current window to 1 packet. */
-      fprintf(stderr, "\nTimeout detected.\n"); fflush(stderr);
-    } else {
-      pthread_mutex_unlock(&(gate->tm_mtx));
+      gate->AXW = 0;		/* Set auxiliary window to 0. */
+      gate->outsnd = gate->outbeg; /* Resend window. */
+      fflush(stderr);
+      pthread_cond_broadcast(&(gate->outbuf_var));
+      pthread_mutex_unlock(&(gate->outbuf_mtx));
     }
-    pthread_mutex_unlock(&(gate->outbuf_mtx));
   }
   pthread_exit(NULL);
 }
@@ -442,9 +448,11 @@ int dtp_send(struct dtp_gate* gate, const void* data, size_t len) {
     if( blk > PAYLOAD )
       blk = PAYLOAD;
     pthread_mutex_lock(&(gate->outbuf_mtx));
+
     /* Wait for space on buffer. */
     while( (gate->outend + MXW - gate->outbeg)%MXW >= MXW - 1 )
       pthread_cond_wait(&(gate->outbuf_var), &(gate->outbuf_mtx));
+
     make_pkt((gate->outbuf)+(gate->outend),
 	     gate->sndno,
 	     0,
@@ -462,8 +470,10 @@ int dtp_send(struct dtp_gate* gate, const void* data, size_t len) {
   }
   /* Wait for ackets. */
   pthread_mutex_lock(&(gate->outbuf_mtx));
+
   while( gate->seqno != expseq )
     pthread_cond_wait(&(gate->outbuf_var), &(gate->outbuf_mtx));
+
   pthread_mutex_unlock(&(gate->outbuf_mtx));
   return 0;
 }

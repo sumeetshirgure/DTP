@@ -24,7 +24,7 @@ struct dtp_gate {
   struct sockaddr_in addr;	/* Remote address. */
 
   /* Connection state. */
-  struct timespec ackstamp;	/* Timestamp. */
+  struct timeval ackstamp;	/* Timestamp. */
   pthread_mutex_t tm_mtx;	/* Timestamp mutex guard. */
   pthread_cond_t tm_cv;		/* Timestamp semaphore. */
 
