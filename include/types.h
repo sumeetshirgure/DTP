@@ -14,9 +14,11 @@ typedef unsigned int seq_t;	/* 4 bytes */
 #define ACK 0x0001
 #define SYN 0x0002
 #define FIN 0x0004
+#define RST 0x0008
 
 typedef struct packet_t {
   seq_t seq;			/* 4 byte sequence number. */
+  seq_t ack;			/* 4 byte sequence number. */
   wptr_t wptr;			/* 2 byte Window pointer. */
   len_t len;			/* 2 byte data size. */
   len_t wsz;			/* 2 byte broadcast window size. */
