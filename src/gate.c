@@ -447,9 +447,9 @@ int dtp_send(struct dtp_gate* gate, const void* data, size_t len) {
     gate->sndno += blk;
     expseq = gate->sndno;
     gate->outend = (gate->outend + 1)%MXW;
+    beg += blk;
     pthread_cond_broadcast(&(gate->outbuf_var));
     pthread_mutex_unlock(&(gate->outbuf_mtx));
-    beg += blk;
   }
   /* Wait for ackets. */
   pthread_mutex_lock(&(gate->outbuf_mtx));
@@ -473,13 +473,14 @@ int dtp_recv(struct dtp_gate* gate, void* data, size_t size) {
     size_t wr_len = end - beg, rem = (pkt->len - gate->byte_offset);
     if( wr_len >= rem ) {
       wr_len = rem;
-      memcpy(beg, pkt->data, wr_len); /* Write packet data. */
+      /* Write packet data. */
+      memcpy(beg, pkt->data + gate->byte_offset, wr_len);
       gate->rcvf[gate->inbeg] = 0; /* Clear bit. */
       gate->inbeg = (gate->inbeg + 1)%MXW;
       gate->byte_offset = 0;	/* Reset offset. */
       pthread_cond_broadcast(&(gate->inbuf_var));
     } else {
-      memcpy(beg, pkt->data, wr_len);
+      memcpy(beg, pkt->data + gate->byte_offset, wr_len);
       gate->byte_offset += wr_len;
     }
     beg += wr_len;
