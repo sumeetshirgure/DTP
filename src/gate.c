@@ -429,7 +429,7 @@ int dtp_send(struct dtp_gate* gate, const void* data, size_t len) {
   const byte_t * beg = (const byte_t *)data,
     * end = beg + len; /* Convert to byte pointers. */
   size_t expseq;       /* Expected sequence numbers. */
-  while( data != end ) {
+  while( beg != end ) {
     size_t blk = end-beg;
     if( blk > PAYLOAD )
       blk = PAYLOAD;
