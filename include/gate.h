@@ -46,6 +46,8 @@ struct dtp_gate {
   size_t inbeg, inend;		 /* Pointers to inbuf. */
   pthread_mutex_t inbuf_mtx;	 /* Guards in<var> */
   pthread_cond_t inbuf_var;	 /* Guards in<var> */
+  size_t byte_offset;		 /* Byte offset in the last packet that has
+				    not been read completely yet. */
 
   pthread_t snd_dmn;	 /* Thread handling outgoing packet I/O. */
   pthread_t rcv_dmn;	 /* Thread handling incoming packet I/O. */
