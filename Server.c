@@ -30,16 +30,35 @@ int main (int argc, char *argv[]) {
   printf("(%d) :: %s:%u\n",  server.status, client_ip, client_port);
   printf("InitSeq <Self : %u, Remote : %u>\n", server.seqno, server.ackno);
 
-  char text[1<<7];
-  scanf("%s", text);
-  printf("Sending : %s\n", text);
-
-  if( dtp_send(&server, text, 10) != 0 ) {
-    fprintf(stderr, "Error in dtp_send.\n");
+  size_t filesize;
+  if( dtp_recv(&server, &filesize, sizeof(size_t)) != 0 ) {
+    fprintf(stderr, "Error in dtp_recv.\n");
     return 1;
   }
 
-  pthread_mutex_unlock(&(server.outbuf_mtx));
+  int temp;
+  printf("Received file size : %lu\nContinue?", filesize);
+  scanf("%d", &temp);
+
+  size_t remsize = filesize;
+  FILE* outfile = fopen("Outfile", "wb");
+  char buff[2000];
+  while( remsize > 0 ) {
+    size_t len = remsize;
+    if( len > 2000 ) len = 2000;
+    if( dtp_recv(&server, buff, len) != 0 ) {
+      fprintf(stderr, "Error in dtp_recv.\n");
+      return 1;
+    }
+    fwrite(buff, 1, len, outfile);
+    remsize -= len;
+    printf("Bytes remaining : %lu\n", remsize);
+    fflush(stdout);
+  }
+
+  printf("\nOutfile received.\n");
+
+  fclose(outfile);
 
   close_dtp_gate(&server);
 

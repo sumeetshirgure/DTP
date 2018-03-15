@@ -6,9 +6,18 @@
 
 #include <arpa/inet.h>
 
+#include <sys/stat.h>
+
+/* Returns size of file. */
+size_t get_filesize(const char* filename) {
+  struct stat file_stats;
+  stat(filename, &file_stats);
+  return file_stats.st_size;
+}
+
 int main (int argc, char *argv[]) {
-  if( argc != 3 ) {
-    fprintf(stderr, "Usage: %s <server_ip> <server_port>\n", argv[0]);
+  if( argc != 4 ) {
+    fprintf(stderr, "Usage: %s <server_ip> <server_port> <filename>\n", argv[0]);
     return 1;
   }
 
@@ -34,17 +43,37 @@ int main (int argc, char *argv[]) {
 	 inet_ntoa(client.addr.sin_addr), ntohs(client.addr.sin_port));
   printf("InitSeq <Self : %u, Remote : %u>\n", client.seqno, client.ackno);
 
-  char text[1<<10];
-  size_t len = 10;
+  FILE* file = fopen(argv[3], "rb");
+  if( file == NULL ) {
+    perror("fopen");
+    return 1;
+  }
+  size_t filesize = get_filesize(argv[3]);
 
-  if( dtp_recv(&client, text, len) != 0 ) {
-    fprintf(stderr, "Error in dtp_recv.\n");
+  if( dtp_send(&client, &filesize, sizeof(size_t)) != 0 ) {
+    fprintf(stderr, "Error in dtp_send.\n");
     return 1;
   }
 
-  text[len] = 0;
+  int temp;
+  printf("Received file sent : %lu\nContinue?", filesize);
+  scanf("%d", &temp);
 
-  printf("Received : [%s]\n", text);
+  const size_t BUFLEN = 1<<16;
+  char buff[BUFLEN];
+  while( 1 ) {
+    size_t bytes = fread(buff, 1, BUFLEN, file);
+    if( bytes == 0 )
+      break;
+    if( dtp_send(&client, buff, bytes) != 0 ) {
+      fprintf(stderr, "Error in dtp_send.\n");
+      return 1;
+    }
+  }
+
+  fclose(file);
+
+  printf("%s sent.\n", argv[3]);
 
   close_dtp_gate(&client);
 

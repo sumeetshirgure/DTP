@@ -10,7 +10,9 @@
 #include <stdlib.h>		/* rand() */
 #include <errno.h>
 
-const size_t MXW = 1<<10;	/* 1 + Maximum window size. */
+#include <stdio.h>
+
+const size_t MXW = 1<<16;	/* 1 + Maximum window size. */
 
 /* Resources to allocate once a connection is established. */
 int setup_gate (struct dtp_gate* gate);
@@ -245,6 +247,9 @@ static void * sender_daemon (void * arg) {
     pthread_mutex_unlock(&(gate->tm_mtx));
     gate->outsnd = (gate->outsnd + 1) % MXW;
     pthread_cond_broadcast(&(gate->outbuf_var));
+    fprintf(stderr, "Sending [%u, %u, %u] (%u/%u) @%u\r",
+	    gate->outbeg, gate->outsnd, gate->outend,
+	    sndsize, bufsize, gate->WND); fflush(stderr);
     pthread_mutex_unlock(&(gate->outbuf_mtx));
   }
   pthread_exit(NULL);
@@ -290,6 +295,8 @@ static void * receiver_daemon (void * arg) {
       if( gate->rcvf[packet.wptr] == 0 ) {
 	(gate->rcvf)[packet.wptr] = 1;
 	(gate->inbuf)[packet.wptr] = packet;
+	fprintf(stderr, "Accepting (%u, %u) @%u",
+		gate->inbeg, gate->inend, gate->WND); fflush(stderr);
 	/* Send cumulative acknowledgement packet. */
 	gate->ackno = packet.seq + packet.len;
 	packet_t *pkt;
@@ -338,6 +345,7 @@ static void * timeout_daemon (void * arg) {
       /* Trigger timeout. */
       gate->SSTH = (gate->SSTH + 1) >> 1; /* Halve ssthresh. */
       gate->WND = 1;		/* Set current window to 1 packet. */
+      fprintf(stderr, "\nTimeout detected.\n"); fflush(stderr);
     } else {
       pthread_mutex_unlock(&(gate->tm_mtx));
     }
@@ -435,7 +443,7 @@ int dtp_send(struct dtp_gate* gate, const void* data, size_t len) {
       blk = PAYLOAD;
     pthread_mutex_lock(&(gate->outbuf_mtx));
     /* Wait for space on buffer. */
-    while( (gate->outend + MXW - gate->inbeg)%MXW >= MXW - 1 )
+    while( (gate->outend + MXW - gate->outbeg)%MXW >= MXW - 1 )
       pthread_cond_wait(&(gate->outbuf_var), &(gate->outbuf_mtx));
     make_pkt((gate->outbuf)+(gate->outend),
 	     gate->sndno,
@@ -444,7 +452,7 @@ int dtp_send(struct dtp_gate* gate, const void* data, size_t len) {
 	     blk,
 	     0,
 	     0,
-	     data);
+	     beg);
     gate->sndno += blk;
     expseq = gate->sndno;
     gate->outend = (gate->outend + 1)%MXW;
