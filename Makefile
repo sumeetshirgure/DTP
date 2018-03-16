@@ -5,21 +5,21 @@ SRC=src
 none :
 
 server : Server.c dtp
-	gcc -std=c99 -Iinclude Server.c -o server -Wl,-R,lib -Llib -ldtp -lrt -lpthread
+	gcc -std=c99 -Iinclude Server.c -o server -Wl,-R,lib -Llib -ldtp -lpthread
 
 client : Client.c dtp
-	gcc -std=c99 -Iinclude Client.c -o client -Wl,-R,lib -Llib -ldtp -lrt -lpthread
+	gcc -std=c99 -Iinclude Client.c -o client -Wl,-R,lib -Llib -ldtp -lpthread
 
-dtp : libdtp.so
+dtp : $(LIB)/libdtp.so
 
-libdtp.so : $(LIB)/libgate.o $(LIB)/libpacket.o
-	gcc -shared -fPIC $^ -Wl,-soname,libdtp.so -o $(LIB)/libdtp.so -lrt
+$(LIB)/libdtp.so : $(LIB)/libgate.o $(LIB)/libpacket.o
+	gcc -shared -fPIC $^ -Wl,-soname,libdtp.so -o $@
 
 $(LIB)/libgate.o : $(SRC)/gate.c $(INC)/gate.h
-	gcc -c -fPIC -I$(INC) $(SRC)/gate.c -o $(LIB)/libgate.o -lrt
+	gcc -c -fPIC -I$(INC) $(SRC)/gate.c -o $@
 
 $(LIB)/libpacket.o : $(SRC)/packet.c $(INC)/packet.h
-	gcc -c -fPIC -I$(INC) $(SRC)/packet.c -o $(LIB)/libpacket.o -lrt
+	gcc -c -fPIC -I$(INC) $(SRC)/packet.c -o $@
 
 clean :
 	rm -f lib/* server client
