@@ -11,9 +11,15 @@
 #include <stdlib.h>		/* rand() */
 #include <errno.h>
 
-#include <stdio.h>
+#define DTP_DBG
 
-const size_t MXW = 1<<16;	/* 1 + Maximum window size. */
+#ifdef DTP_DBG
+#include <stdio.h>
+#endif
+
+const size_t MXW = (1<<16);	/* 1 + Maximum window size. 64MiB */
+const size_t LIM = (1<<16)-1;		/* Safe limit. */
+const size_t FUTURE_WINDOW = (1<<15);	/* Maximum disorder. 32MiB */
 
 /* Resources to allocate once a connection is established. */
 int setup_gate (struct dtp_gate* gate);
@@ -106,7 +112,7 @@ int dtp_listen (dtp_server * server, char *hostname, port_t *port_no) {
     srand(time(NULL) ^
 	  (server->self).sin_addr.s_addr ^
 	  (server->self).sin_port);
-    server->seqno = rand();
+    server->seqno = 0;
 
     make_pkt(&synpack, server->seqno, server->ackno, 0, 0, 0, SYN|ACK, NULL);
     if( send_pkt(server, &synpack) < 0 )
@@ -180,7 +186,7 @@ int dtp_connect (dtp_client* client) {
 
   /* Initial sequence number. */
   srand(time(NULL));
-  client->seqno = rand();
+  client->seqno = 0;
 
   packet_t synpack;
   make_pkt(&synpack, client->seqno, 0, 0, 0, 0, SYN, NULL);
@@ -232,21 +238,54 @@ int dtp_connect (dtp_client* client) {
 /* Handles outgoing data packets. */
 static void * sender_daemon (void * arg) {
   struct dtp_gate* gate = (struct dtp_gate *) arg;
+  struct timespec timeout;
+  int stat;
   while( 1 ) {
     pthread_mutex_lock(&(gate->outbuf_mtx));
-    size_t sndsize = (gate->outsnd + MXW - gate->outbeg)%MXW;
-    size_t bufsize = (gate->outend + MXW - gate->outbeg)%MXW;
-    while( sndsize >= bufsize || sndsize >= gate->WND ) {
-      pthread_cond_wait(&(gate->outbuf_var), &(gate->outbuf_mtx));
-      sndsize = (gate->outsnd + MXW - gate->outbeg)%MXW;
-      bufsize = (gate->outend + MXW - gate->outbeg)%MXW;
+    while( gate->sndsize ==
+	   (gate->WND < gate->obufsize ?
+	    gate->WND : gate->obufsize) ) {
+      if( gate->sndsize > 0 ) { /* Sender window is fully sent. */
+	gettimeofday(&(gate->ackstamp), NULL);
+	timeout.tv_nsec = gate->ackstamp.tv_usec * 1000;
+	timeout.tv_sec = gate->ackstamp.tv_sec + 1;
+	stat = pthread_cond_timedwait(&(gate->tm_cv),
+				      &(gate->outbuf_mtx),
+				      &timeout);
+	if(stat == ETIMEDOUT) {
+#ifdef DTP_DBG
+	  fprintf(stderr, "\e[38;5;196mTimeout detected <%lu, %lu, %lu> (%lu/%lu) (%lu | %lu)\n",
+		  gate->outbeg, gate->outsnd, gate->outend,
+		  gate->sndsize, gate->obufsize,
+		  gate->WND, gate->SSTH);
+	  fflush(stderr);
+#endif
+	  /* Trigger timeout. */
+	  gate->SSTH = (gate->SSTH + 1) >> 1; /* Halve ssthresh. */
+	  gate->WND = 1;		/* Set current window to 1 packet. */
+	  gate->AXW = 0;		/* Set auxiliary window to 0. */
+	  gate->outsnd = gate->outbeg;	/* Resend window. */
+	  gate->sndsize = 0;
+	  pthread_cond_broadcast(&(gate->outbuf_var));
+	}
+      } else {			/* Wait for next packet to be sent. */
+	pthread_cond_wait(&(gate->outbuf_var), &(gate->outbuf_mtx));
+      }
     }
+
+#ifdef DTP_DBG
+    fprintf(stderr, "Sending outvar=<%lu, %lu, %lu> outsize=(%lu/%lu) outlim=(%lu|%lu) seq=%u\n",
+	    gate->outbeg, gate->outsnd, gate->outend,
+	    gate->sndsize, gate->obufsize,
+	    gate->WND, gate->SSTH, (gate->outbuf[gate->outsnd]).seq);
+    fflush(stderr);
+#endif
+
     send_pkt(gate, (gate->outbuf) + (gate->outsnd));
-    pthread_mutex_lock(&(gate->tm_mtx));
-    gettimeofday(&(gate->ackstamp), NULL);
-    pthread_cond_broadcast(&(gate->tm_cv));
-    pthread_mutex_unlock(&(gate->tm_mtx));
+
     gate->outsnd = (gate->outsnd + 1) % MXW;
+    gate->sndsize++;
+
     pthread_cond_broadcast(&(gate->outbuf_var));
     pthread_mutex_unlock(&(gate->outbuf_mtx));
   }
@@ -258,106 +297,158 @@ static void * receiver_daemon (void * arg) {
   struct dtp_gate* gate = (struct dtp_gate *) arg;
   packet_t packet;
   while( 1 ) {
-    if( recv_pkt(gate, &packet) == RCV_WRHOST )
+    int dbg_stat;
+    if( (dbg_stat = recv_pkt(gate, &packet)) == RCV_WRHOST ) {
+#ifdef DTP_DBG
+      fprintf(stderr, "Received packet from 3rd host.\n");
+      fflush(stderr);
+#endif
       continue;
+    }
+    // pthread_cond_broadcast(&(gate->tm_cv)); /* Signal packet received. */
+
+    /* Acknowledgement. */
     if( packet.flags & ACK ) {
       pthread_mutex_lock(&(gate->outbuf_mtx));
-      size_t ack = packet.ack;
-      pthread_cond_broadcast(&(gate->tm_cv)); /* Signal ACK received. */
-      if( (gate->seqno < ack && ack <= gate->sndno) ||
-	  !(gate->sndno < ack && ack <= gate->seqno) ) { /* Shift window. */
+      seq_t ack = packet.ack;
+      
+#ifdef DTP_DBG
+      fprintf(stderr, "Ackrcvd outvar=<%lu, %lu, %lu> outsize=(%lu/%lu) outlim=(%lu|%lu) ((%u))\n",
+	      gate->outbeg, gate->outsnd, gate->outend,
+	      gate->sndsize, gate->obufsize,
+	      gate->WND, gate->SSTH, packet.seq);
+
+      if( (gate->seqno <= gate->sndno ) ?
+	  (gate->seqno <= ack && ack <= gate->sndno) :
+	  (gate->seqno <= ack || ack <= gate->sndno) ) {
+      } else {
+	fprintf(stderr, "OOOACK.\n");
+      }
+      fflush(stderr);
+#endif
+
+      /* Validate sequence number range. */
+      if( (gate->seqno <= gate->sndno ) ?
+	  (gate->seqno <= ack && ack <= gate->sndno) :
+	  (gate->seqno <= ack || ack <= gate->sndno) ) {
+
+	/* Reset timeout. */
+	pthread_cond_signal(&(gate->tm_cv));
+
 	packet_t *pkt;
-	while( gate->seqno != ack ) {
+	while( gate->seqno != ack ) { /* Shift window. */
 	  pkt = (gate->outbuf) + (gate->outbeg);
 	  gate->seqno = pkt->seq + pkt->len;
 	  gate->outbeg = (gate->outbeg + 1) % MXW;
+	  gate->obufsize--;
+	  if( gate->sndsize == 0 )
+	    gate->outsnd = gate->outbeg;
+	  else
+	    gate->sndsize--;
+
 	  if( gate->WND >= gate->SSTH ) {
 	    gate->AXW++;
 	    if( gate->AXW == gate->WND ) {
 	      gate->AXW = 0;
-	      if( gate->WND + 1 < MXW )
+	      if( gate->WND + 1 < LIM ) {
 		gate->WND++;	/* Additive increase. */
+		gate->SSTH++;
+	      }
 	    }
 	  } else {
-	    if( gate->WND + 1 < MXW )
+	    if( gate->WND + 1 < LIM )
 	      gate->WND++;	/* Exponential start. */
 	  }
+	  
+	  /* Limit by receiver window size. */
 	  if( gate->WND > packet.wsz )
-	    gate->WND = packet.wsz; /* Limit by receiver window size. */
+	    gate->WND = packet.wsz; 
+
+	  /* Reset sent size. */
+	  if( gate->WND < gate->sndsize ) {
+	    gate->outsnd = (gate->outbeg + gate->WND)%MXW;
+	    gate->sndsize = gate->WND;
+	  }
 	}
 	pthread_cond_broadcast(&(gate->outbuf_var));
       }
+      /* Detect DUPACKS. */
+      if( ack == gate->lstack ) {
+	gate->ackfr++;
+	if( gate->ackfr == 3 ) { /* Detect 3 DUPACKS */
+
+#ifdef DTP_DBG
+	  fprintf(stderr, "Triple DUPACK.\n");
+	  fflush(stderr);
+#endif
+	  
+	  gate->SSTH = (gate->SSTH + 1) >> 1; /* Halve ssthresh */
+	  gate->WND = 1 + gate->WND / 2;	/* Also halve WND.*/
+	  gate->AXW = 0;
+	  gate->outsnd = gate->outbeg; /* Resend window. */
+	  gate->sndsize = 0;
+	  pthread_cond_broadcast(&(gate->outbuf_var));
+	}
+      } else {
+	gate->lstack = ack;
+	gate->ackfr = 0;
+      }
       pthread_mutex_unlock(&(gate->outbuf_mtx));
-    } /* Acknowledgement. */
+    }
+
     if( packet.len > 0 ) {	/* Data. */
       pthread_mutex_lock(&(gate->inbuf_mtx));
-      if( gate->rcvf[packet.wptr] == 0 ) {
-	(gate->rcvf)[packet.wptr] = 1;
-	(gate->inbuf)[packet.wptr] = packet;
-	/* Send cumulative acknowledgement packet. */
-	gate->ackno = packet.seq + packet.len;
-	packet_t *pkt;
-	while( (gate->rcvf)[(gate->inend)] == 1 ) {
-	  pkt = (gate->inbuf) + (gate->inend);
-	  gate->ackno = pkt->seq + pkt->len;
-	  gate->inend = (gate->inend + 1) % MXW;
+
+      size_t wpt = packet.wptr;
+
+      if( (gate->inbeg <= gate->inend) ?
+	  (gate->inbeg <= wpt && wpt < gate->inend) :
+	  (gate->inbeg <= wpt || wpt < gate->inend) ) {
+	/* Packet already in unread range. 
+	   Don't acknowledge. */
+      } else {
+	if( (packet.wptr + MXW - gate->inbeg)%MXW < FUTURE_WINDOW
+	    && gate->rcvf[packet.wptr] == 0
+	    && gate->ibufsize + 1 < LIM ) { /* Ack only if receiver buffer is nonfull. */
+
+	  (gate->rcvf)[packet.wptr] = 1;
+	  (gate->inbuf)[packet.wptr] = packet;
+
+	  packet_t *pkt;
+	  while( (gate->rcvf)[(gate->inend)] == 1 ) {
+	    pkt = (gate->inbuf) + (gate->inend);
+	    if( gate->ackno != pkt->seq ) {
+	      
+#ifdef DTP_DBG
+	      fprintf(stderr, "Nope.\n");
+	      fflush(stderr);
+#endif
+
+	    }
+	    gate->ackno = pkt->seq + pkt->len;
+	    gate->inend = (gate->inend + 1) % MXW;
+	    gate->ibufsize++;
+	    pthread_cond_broadcast(&(gate->inbuf_var));
+	  }
+
+#ifdef DTP_DBG
+	  fprintf(stderr, "Datrcvd [%lu, %lu]@%u. Expecting : %u\n",
+		  gate->inbeg, gate->inend, packet.wptr, gate->ackno);
+	  fflush(stderr);
+#endif
 	}
+
+	/* Send cumulative acknowledgement packet. */
 	packet.flags = ACK;
 	packet.len = 0;
 	packet.ack = gate->ackno;
-	packet.wsz = MXW - 1 -	/* Broadcast window size. */
-	  (gate->inend + MXW - gate->inbeg) % MXW;
+	packet.wsz = LIM - gate->ibufsize;
 	send_pkt(gate, &packet);
-	pthread_cond_broadcast(&(gate->inbuf_var));
       }
+
       pthread_mutex_unlock(&(gate->inbuf_mtx));
-    }
-  }
-  pthread_exit(NULL);
-}
-
-/* Handles flow and congestion control. */
-static void * timeout_daemon (void * arg) {
-  struct dtp_gate* gate = (struct dtp_gate *) arg;
-  struct timespec timeout;
-  while( 1 ) {
-    pthread_mutex_lock(&(gate->outbuf_mtx));
-    /* Wait for all packets of the window to be sent. */
-    size_t sndsize = (gate->outsnd + MXW - gate->outbeg)%MXW;
-    size_t bufsize = (gate->outend + MXW - gate->outbeg)%MXW;
-    /* Wait till entire window (and at least one packet) is sent. */
-    while( bufsize == 0 ||
-	   sndsize < gate->WND && sndsize < bufsize ) {
-      pthread_cond_wait(&(gate->outbuf_var), &(gate->outbuf_mtx));
-      sndsize = (gate->outsnd + MXW - gate->outbeg)%MXW;
-      bufsize = (gate->outend + MXW - gate->outbeg)%MXW;
-    }
-    pthread_mutex_unlock(&(gate->outbuf_mtx));
-    pthread_mutex_lock(&(gate->tm_mtx));
-    /* 1 second timeout */
-    timeout.tv_nsec = gate->ackstamp.tv_usec * 1000;
-    timeout.tv_sec = gate->ackstamp.tv_sec + 1;
-    // simultaneously release lock
-    int stat = pthread_cond_timedwait(&(gate->tm_cv),
-				      &(gate->tm_mtx),
-				      &timeout);
-    pthread_mutex_unlock(&(gate->tm_mtx));
-    if(stat == ETIMEDOUT) {
-      fprintf(stderr, "Timeout detected <%lu, %lu, %lu> (%lu | %lu)\n",
-	      gate->outbeg, gate->outsnd, gate->outend,
-	      gate->WND, gate->SSTH);
-
-      pthread_mutex_lock(&(gate->outbuf_mtx));
-      /* Trigger timeout. */
-      gate->SSTH = (gate->SSTH + 1) >> 1; /* Halve ssthresh. */
-      gate->WND = 1;		/* Set current window to 1 packet. */
-      gate->AXW = 0;		/* Set auxiliary window to 0. */
-      gate->outsnd = gate->outbeg; /* Resend window. */
-      fflush(stderr);
-      pthread_cond_broadcast(&(gate->outbuf_var));
-      pthread_mutex_unlock(&(gate->outbuf_mtx));
-    }
-  }
+    } /* Data packet. */
+  } /* while (1)  */
   pthread_exit(NULL);
 }
 
@@ -371,15 +462,18 @@ int setup_gate (struct dtp_gate* gate) {
       gate->outbuf == NULL ||
       gate->rcvf == NULL )
     return -1;
+  gate->sndsize = gate->obufsize = 0;
   gate->outbeg = gate->outsnd = gate->outend = 0;
-  gate->inbeg = gate->inend = 0;
+  gate->inbeg = gate->inend = gate->ibufsize = 0;
   gate->WND = 1;		/* Initial window size. */
-  gate->SSTH = MXW;		/* Set initial ssthresh to MXW */
+  gate->SSTH = MXW >> 1;	/* Set initial ssthresh to MXW / 2 */
   gate->AXW = 0;		/* Auxiliary window size.
 				   Used to implement congestion avoidance. */
   gate->sndno = gate->seqno;	/* Sent sequence numbers. */
+  gate->lstack = gate->ackno;	/* Last acknowledged sequence number. */
   gate->ackfr = 0;		/* Frequency of last acked sequence number. */
   gate->byte_offset = 0;	/* Byte offset. */
+
   int stat;
   /* Initialize mutexes and semaphores. */
   stat = pthread_mutex_init(&(gate->outbuf_mtx), NULL);
@@ -394,9 +488,6 @@ int setup_gate (struct dtp_gate* gate) {
   stat = pthread_cond_init(&(gate->inbuf_var), NULL);
   if( stat != 0 )
     return stat;
-  stat = pthread_mutex_init(&(gate->tm_mtx), NULL);
-  if( stat != 0 )
-    return stat;
   stat = pthread_cond_init(&(gate->tm_cv), NULL);
   if( stat != 0 )
     return stat;
@@ -406,10 +497,6 @@ int setup_gate (struct dtp_gate* gate) {
     return stat;
   /* Initialize receiver deamon. */
   stat = pthread_create(&(gate->rcv_dmn), NULL, receiver_daemon, gate);
-  if( stat != 0 )
-    return stat;
-  /* Initialize controller deamon. */
-  stat = pthread_create(&(gate->tmo_dmn), NULL, timeout_daemon, gate);
   return stat;
 }
 
@@ -419,7 +506,6 @@ int close_dtp_gate (struct dtp_gate * gate) {
   /* Stop daemons. */
   pthread_cancel(gate->snd_dmn);
   pthread_cancel(gate->rcv_dmn);
-  pthread_cancel(gate->tmo_dmn);
   /* Destroy buffers. */
   free(gate->inbuf);
   free(gate->outbuf);
@@ -429,7 +515,6 @@ int close_dtp_gate (struct dtp_gate * gate) {
   pthread_cond_destroy(&(gate->outbuf_var));
   pthread_mutex_destroy(&(gate->inbuf_mtx));
   pthread_cond_destroy(&(gate->inbuf_var));
-  pthread_mutex_destroy(&(gate->tm_mtx));
   pthread_cond_destroy(&(gate->tm_cv));
   gate->status = IDLE;
   return 0;
@@ -449,11 +534,9 @@ int dtp_send(struct dtp_gate* gate, const void* data, size_t len) {
     if( blk > PAYLOAD )
       blk = PAYLOAD;
     pthread_mutex_lock(&(gate->outbuf_mtx));
-
     /* Wait for space on buffer. */
-    while( (gate->outend + MXW - gate->outbeg)%MXW >= MXW - 1 )
+    while( gate->obufsize >= LIM )
       pthread_cond_wait(&(gate->outbuf_var), &(gate->outbuf_mtx));
-
     make_pkt((gate->outbuf)+(gate->outend),
 	     gate->sndno,
 	     0,
@@ -465,17 +548,17 @@ int dtp_send(struct dtp_gate* gate, const void* data, size_t len) {
     gate->sndno += blk;
     expseq = gate->sndno;
     gate->outend = (gate->outend + 1)%MXW;
+    gate->obufsize++;
     beg += blk;
     pthread_cond_broadcast(&(gate->outbuf_var));
     pthread_mutex_unlock(&(gate->outbuf_mtx));
   }
-  /* Wait for ackets. */
+  /* Wait for ackets. * /
   pthread_mutex_lock(&(gate->outbuf_mtx));
-
   while( gate->seqno != expseq )
     pthread_cond_wait(&(gate->outbuf_var), &(gate->outbuf_mtx));
-
   pthread_mutex_unlock(&(gate->outbuf_mtx));
+  /**/
   return 0;
 }
 
@@ -487,7 +570,7 @@ int dtp_recv(struct dtp_gate* gate, void* data, size_t size) {
   byte_t * beg = (byte_t *) data, * end = beg + size;
   while( beg != end ) {
     pthread_mutex_lock(&(gate->inbuf_mtx));
-    while( (gate->inend + MXW - gate->inbeg)%MXW == 0 )
+    while( gate->ibufsize == 0 )
       pthread_cond_wait(&(gate->inbuf_var), &(gate->inbuf_mtx));
     packet_t *pkt = (gate->inbuf) + (gate->inbeg);
     size_t wr_len = end - beg, rem = (pkt->len - gate->byte_offset);
@@ -495,8 +578,9 @@ int dtp_recv(struct dtp_gate* gate, void* data, size_t size) {
       wr_len = rem;
       /* Write packet data. */
       memcpy(beg, pkt->data + gate->byte_offset, wr_len);
-      gate->rcvf[gate->inbeg] = 0; /* Clear bit. */
-      gate->inbeg = (gate->inbeg + 1)%MXW;
+      (gate->rcvf)[gate->inbeg] = 0; /* Clear bit. */
+      (gate->inbeg) = (gate->inbeg + 1)%MXW;
+      gate->ibufsize--;
       gate->byte_offset = 0;	/* Reset offset. */
       pthread_cond_broadcast(&(gate->inbuf_var));
     } else {

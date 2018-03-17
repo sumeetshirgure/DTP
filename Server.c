@@ -46,7 +46,7 @@ int main (int argc, char *argv[]) {
   size_t remsize = filesize;
   FILE* outfile = fopen("Outfile", "wb");
 
-  const size_t BUFLEN = 1<<10;
+  const size_t BUFLEN = 1<<16;
   char buff[BUFLEN];
   while( remsize > 0 ) {
     size_t len = remsize;
@@ -61,11 +61,18 @@ int main (int argc, char *argv[]) {
     fflush(stdout);
   }
 
+  if( dtp_send(&server, &filesize, sizeof(size_t)) != 0 ) {
+    fprintf(stderr, "Error in dtp_send.\n");
+    return 1;
+  }
+
   printf("\nOutfile received.\n");
 
   fclose(outfile);
 
   close_dtp_gate(&server);
+
+  sleep(1);
 
   return 0;
 }

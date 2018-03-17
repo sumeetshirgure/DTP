@@ -30,12 +30,13 @@ struct dtp_gate {
 
   /* Sequence numbers. */
   seq_t seqno, sndno;		/* Sent sequence numbers. */
-  seq_t ackno, ackfr;		/* Acknowledgement metadata. */
+  seq_t ackno, lstack, ackfr;	/* Acknowledgement metadata. */
 
   /* Packet buffers. */
   packet_t *inbuf, *outbuf;	 /* Incoming / outgoing data. */
 
   /* Outgoing data flow control. */
+  size_t sndsize, obufsize;
   size_t outbeg, outsnd, outend; /* 3 pointers to outbuf. */
   size_t WND, AXW, SSTH;	/* Windowing variables / threshold. */
   pthread_mutex_t outbuf_mtx;	/* Guards out<var> */
@@ -43,6 +44,7 @@ struct dtp_gate {
 
   /* Incoming data flow control. */
   byte_t *rcvf;			 /* Received flags. */
+  size_t ibufsize;
   size_t inbeg, inend;		 /* Pointers to inbuf. */
   pthread_mutex_t inbuf_mtx;	 /* Guards in<var> */
   pthread_cond_t inbuf_var;	 /* Guards in<var> */

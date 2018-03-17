@@ -6,7 +6,11 @@
 #include <sys/socket.h>
 #include <errno.h>
 
+// #define PACKET_TRACE
+
+#ifdef PACKET_TRACE
 #include <stdio.h>
+#endif
 
 /* Returns nonzero if two addresses are different. */
 int validate_address (const struct sockaddr_in *addr0,

@@ -65,7 +65,7 @@ int main (int argc, char *argv[]) {
 
   printf("File size acked : %lu\n", chksize);
 
-  const size_t BUFLEN = 1<<10;
+  const size_t BUFLEN = 1<<16;
   char buff[BUFLEN];
   while( 1 ) {
     size_t bytes = fread(buff, 1, BUFLEN, file);
@@ -78,6 +78,11 @@ int main (int argc, char *argv[]) {
   }
 
   fclose(file);
+
+  if( dtp_recv(&client, &chksize, sizeof(size_t)) != 0 ) {
+    fprintf(stderr, "Error in dtp_recv.\n");
+    return 1;
+  }
 
   printf("%s sent.\n", argv[3]);
 
