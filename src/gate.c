@@ -11,15 +11,15 @@
 #include <stdlib.h>		/* rand() */
 #include <errno.h>
 
-#define DTP_DBG
+// #define DTP_DBG
 
-#ifdef DTP_DBG
+//#ifdef DTP_DBG
 #include <stdio.h>
-#endif
+//#endif
 
-const size_t MXW = (1<<16);	/* 1 + Maximum window size. 64MiB */
-const size_t LIM = (1<<16)-1;		/* Safe limit. */
-const size_t FUTURE_WINDOW = (1<<15);	/* Maximum disorder. 32MiB */
+const size_t MXW = (1<<12);	/* 1 + Maximum window size. 4MiB */
+const size_t LIM = (1<<12)-1;		/* Safe limit. */
+const size_t FUTURE_WINDOW = (1<<11);	/* Maximum disorder. 1MiB */
 
 /* Resources to allocate once a connection is established. */
 int setup_gate (struct dtp_gate* gate);
@@ -112,7 +112,7 @@ int dtp_listen (dtp_server * server, char *hostname, port_t *port_no) {
     srand(time(NULL) ^
 	  (server->self).sin_addr.s_addr ^
 	  (server->self).sin_port);
-    server->seqno = 0;
+    server->seqno = rand();
 
     make_pkt(&synpack, server->seqno, server->ackno, 0, 0, 0, SYN|ACK, NULL);
     if( send_pkt(server, &synpack) < 0 )
@@ -186,7 +186,7 @@ int dtp_connect (dtp_client* client) {
 
   /* Initial sequence number. */
   srand(time(NULL));
-  client->seqno = 0;
+  client->seqno = rand();
 
   packet_t synpack;
   make_pkt(&synpack, client->seqno, 0, 0, 0, 0, SYN, NULL);
@@ -253,13 +253,13 @@ static void * sender_daemon (void * arg) {
 				      &(gate->outbuf_mtx),
 				      &timeout);
 	if(stat == ETIMEDOUT) {
-#ifdef DTP_DBG
+	  //#ifdef DTP_DBG
 	  fprintf(stderr, "\e[38;5;196mTimeout detected <%lu, %lu, %lu> (%lu/%lu) (%lu | %lu)\n",
 		  gate->outbeg, gate->outsnd, gate->outend,
 		  gate->sndsize, gate->obufsize,
 		  gate->WND, gate->SSTH);
 	  fflush(stderr);
-#endif
+	  //#endif
 	  /* Trigger timeout. */
 	  gate->SSTH = (gate->SSTH + 1) >> 1; /* Halve ssthresh. */
 	  gate->WND = 1;		/* Set current window to 1 packet. */
@@ -282,8 +282,8 @@ static void * sender_daemon (void * arg) {
 #endif
 
     send_pkt(gate, (gate->outbuf) + (gate->outsnd));
-
     gate->outsnd = (gate->outsnd + 1) % MXW;
+
     gate->sndsize++;
 
     pthread_cond_broadcast(&(gate->outbuf_var));
@@ -305,7 +305,9 @@ static void * receiver_daemon (void * arg) {
 #endif
       continue;
     }
-    // pthread_cond_broadcast(&(gate->tm_cv)); /* Signal packet received. */
+
+    /* Reset timeout. */
+    pthread_cond_signal(&(gate->tm_cv));
 
     /* Acknowledgement. */
     if( packet.flags & ACK ) {
@@ -331,9 +333,6 @@ static void * receiver_daemon (void * arg) {
       if( (gate->seqno <= gate->sndno ) ?
 	  (gate->seqno <= ack && ack <= gate->sndno) :
 	  (gate->seqno <= ack || ack <= gate->sndno) ) {
-
-	/* Reset timeout. */
-	pthread_cond_signal(&(gate->tm_cv));
 
 	packet_t *pkt;
 	while( gate->seqno != ack ) { /* Shift window. */
@@ -401,50 +400,42 @@ static void * receiver_daemon (void * arg) {
 
       size_t wpt = packet.wptr;
 
-      if( (gate->inbeg <= gate->inend) ?
-	  (gate->inbeg <= wpt && wpt < gate->inend) :
-	  (gate->inbeg <= wpt || wpt < gate->inend) ) {
-	/* Packet already in unread range. 
-	   Don't acknowledge. */
-      } else {
-	if( (packet.wptr + MXW - gate->inbeg)%MXW < FUTURE_WINDOW
-	    && gate->rcvf[packet.wptr] == 0
-	    && gate->ibufsize + 1 < LIM ) { /* Ack only if receiver buffer is nonfull. */
+      if( (packet.wptr + MXW - gate->inbeg)%MXW < FUTURE_WINDOW
+	  && gate->rcvf[packet.wptr] == 0
+	  && gate->ibufsize < LIM ) { /* Ack only if receiver buffer is nonfull. */
 
-	  (gate->rcvf)[packet.wptr] = 1;
-	  (gate->inbuf)[packet.wptr] = packet;
+	(gate->rcvf)[packet.wptr] = 1;
+	(gate->inbuf)[packet.wptr] = packet;
 
-	  packet_t *pkt;
-	  while( (gate->rcvf)[(gate->inend)] == 1 ) {
-	    pkt = (gate->inbuf) + (gate->inend);
-	    if( gate->ackno != pkt->seq ) {
-	      
+	packet_t *pkt;
+	while( gate->ibufsize < LIM &&
+	       (gate->rcvf)[(gate->inend)] == 1 ) {
+	  pkt = (gate->inbuf) + (gate->inend);
 #ifdef DTP_DBG
-	      fprintf(stderr, "Nope.\n");
-	      fflush(stderr);
-#endif
-
-	    }
-	    gate->ackno = pkt->seq + pkt->len;
-	    gate->inend = (gate->inend + 1) % MXW;
-	    gate->ibufsize++;
-	    pthread_cond_broadcast(&(gate->inbuf_var));
+	  if( gate->ackno != pkt->seq ) {
+	    fprintf(stderr, "Nope.\n");
+	    fflush(stderr);
 	  }
-
-#ifdef DTP_DBG
-	  fprintf(stderr, "Datrcvd [%lu, %lu]@%u. Expecting : %u\n",
-		  gate->inbeg, gate->inend, packet.wptr, gate->ackno);
-	  fflush(stderr);
 #endif
+	  gate->ackno = pkt->seq + pkt->len;
+	  gate->inend = (gate->inend + 1) % MXW;
+	  gate->ibufsize++;
+	  pthread_cond_broadcast(&(gate->inbuf_var));
 	}
 
-	/* Send cumulative acknowledgement packet. */
-	packet.flags = ACK;
-	packet.len = 0;
-	packet.ack = gate->ackno;
-	packet.wsz = LIM - gate->ibufsize;
-	send_pkt(gate, &packet);
+#ifdef DTP_DBG
+	fprintf(stderr, "Datrcvd [%lu, %lu]@%u. Expecting : %u\n",
+		gate->inbeg, gate->inend, packet.wptr, gate->ackno);
+	fflush(stderr);
+#endif
       }
+
+      /* Send cumulative acknowledgement packet. */
+      packet.flags = ACK;
+      packet.len = 0;
+      packet.ack = gate->ackno;
+      packet.wsz = LIM - gate->ibufsize;
+      send_pkt(gate, &packet);
 
       pthread_mutex_unlock(&(gate->inbuf_mtx));
     } /* Data packet. */
@@ -570,7 +561,7 @@ int dtp_recv(struct dtp_gate* gate, void* data, size_t size) {
   byte_t * beg = (byte_t *) data, * end = beg + size;
   while( beg != end ) {
     pthread_mutex_lock(&(gate->inbuf_mtx));
-    while( gate->ibufsize == 0 )
+    while( gate->ibufsize == 0 ) /* TODO : break */
       pthread_cond_wait(&(gate->inbuf_var), &(gate->inbuf_mtx));
     packet_t *pkt = (gate->inbuf) + (gate->inbeg);
     size_t wr_len = end - beg, rem = (pkt->len - gate->byte_offset);

@@ -15,6 +15,7 @@ typedef unsigned int seq_t;	/* 4 bytes */
 #define SYN 0x0002
 #define FIN 0x0004
 #define RST 0x0008
+#define KLV 0x0010
 
 typedef struct packet_t {
   seq_t seq;			/* 4 byte sequence number. */

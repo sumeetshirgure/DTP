@@ -65,7 +65,7 @@ int main (int argc, char *argv[]) {
 
   printf("File size acked : %lu\n", chksize);
 
-  const size_t BUFLEN = 1<<16;
+  const size_t BUFLEN = 5000;
   char buff[BUFLEN];
   while( 1 ) {
     size_t bytes = fread(buff, 1, BUFLEN, file);
