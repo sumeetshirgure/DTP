@@ -130,7 +130,7 @@ void * receiver_daemon (void * arg) {
 	    if( gate->WND < LIM )
 	      gate->WND++;	/* Exponential start. */
 	  }
-	  
+
 	  /* Limit by receiver window size. */
 	  if( gate->WND > packet.wsz )
 	    gate->WND = packet.wsz; 
@@ -167,7 +167,7 @@ void * receiver_daemon (void * arg) {
       pthread_mutex_unlock(&(gate->outbuf_mtx));
     }
 
-    if( packet.len > 0 ) {	/* Data. */
+    if( packet.len > 0 || (packet.flags & FIN) ) { /* Data or FIN. */
       pthread_mutex_lock(&(gate->inbuf_mtx));
 
       size_t wpt = packet.wptr;
@@ -200,6 +200,17 @@ void * receiver_daemon (void * arg) {
 		gate->inbeg, gate->inend, wpt, gate->ackno);
 	fflush(stderr);
 #endif
+
+	/* If a FIN packet arrives. */
+	if( packet.flags & FIN ) {
+	  if( gate->status == CONN ) {
+	    gate->status = FINR;
+	  } else if( gate->status == FINS ) {
+	    gate->status = CLSD;
+	    pthread_cond_broadcast(&(gate->inbuf_var));
+	  }
+	}
+
       }
 
       /* Send cumulative acknowledgement packet. */

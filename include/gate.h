@@ -13,6 +13,7 @@
 #define CONN 0x02
 #define FINS 0x03
 #define FINR 0x04
+#define CLSD 0x05
 
 /* Window constants. */
 #define MXW (1<<12)		/* 1 + Maximum window size. 4MiB */

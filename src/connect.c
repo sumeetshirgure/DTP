@@ -55,6 +55,11 @@ int setup_gate (struct dtp_gate* gate) {
 }
 
 int dtp_listen (dtp_server * server, char *hostname, port_t *port_no) {
+
+  /* Check gate status. */
+  if( server->status != IDLE )
+    return 1;
+
   int stat;
 
   /* Timeout value. */
@@ -132,6 +137,7 @@ int dtp_listen (dtp_server * server, char *hostname, port_t *port_no) {
   ssize_t buflen = 0;
   while( ('0' <= ret[buflen] && ret[buflen] <= '9') ||
 	 ret[buflen] == '.' ) buflen++; /* Get length of string. */
+  ret[buflen++] = '\0';
   memcpy(hostname, ret, buflen);
 
   *port_no = ntohs((server->addr).sin_port);
@@ -141,6 +147,11 @@ int dtp_listen (dtp_server * server, char *hostname, port_t *port_no) {
 }
 
 int dtp_connect (dtp_client* client) {
+
+  /* Check gate status. */
+  if( client->status != IDLE )
+    return 1;
+
   int stat;
 
   /* Set 1 second timeout on socket. */
@@ -207,14 +218,52 @@ int dtp_connect (dtp_client* client) {
 
 /* Frees buffers and closes connection. */
 int close_dtp_gate (struct dtp_gate * gate) {
-  /* TODO : Add FIN / FIN|ACK / ACK closure with timeout limit. */
-  /* Stop daemons. */
+  if( gate->status == CONN || gate->status == FINR ) {
+    pthread_mutex_lock(&(gate->outbuf_mtx));
+    seq_t finno = gate->sndno;
+
+    while( gate->obufsize >= LIM )
+      pthread_cond_wait(&(gate->outbuf_var), &(gate->outbuf_mtx));
+
+    make_pkt((gate->outbuf)+(gate->outend),
+	     finno,
+	     0,
+	     gate->outend,
+	     0,
+	     0,
+	     FIN,
+	     NULL);
+    gate->outend = (gate->outend + 1)%MXW;
+    gate->obufsize++;
+    pthread_cond_broadcast(&(gate->outbuf_var));
+
+    if( gate->status == CONN ) { /* If connected, wait for acket. */
+      while( gate->seqno != finno )
+	pthread_cond_wait(&(gate->outbuf_var), &(gate->outbuf_mtx));
+    } else {
+      gate->status = CLSD;
+    }
+
+    pthread_mutex_unlock(&(gate->outbuf_mtx));
+
+    if( gate->status == CONN )
+      gate->status = FINS;	/* FIN sent */
+  }
+
+  pthread_mutex_lock(&(gate->inbuf_mtx));
+  while( gate->status == FINS )
+    pthread_cond_wait(&(gate->inbuf_var), &(gate->inbuf_mtx));
+  pthread_mutex_unlock(&(gate->inbuf_mtx));
+
+  /* Stop daemons. Where were they hiding? */
   pthread_cancel(gate->snd_dmn);
   pthread_cancel(gate->rcv_dmn);
+
   /* Destroy buffers. */
   free(gate->inbuf);
   free(gate->outbuf);
   free(gate->rcvf);
+
   /* Free mutexes / semaphores. */
   pthread_mutex_destroy(&(gate->outbuf_mtx));
   pthread_cond_destroy(&(gate->outbuf_var));

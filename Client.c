@@ -76,10 +76,6 @@ int main (int argc, char *argv[]) {
 
   fclose(file);
 
-  dtp_recv(&client, &chksize, sizeof(size_t));
-
-  printf("%s sent.\n", argv[3]);
-
   close_dtp_gate(&client);
 
   return 0;

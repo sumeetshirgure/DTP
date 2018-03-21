@@ -6,6 +6,8 @@
 #include <sys/socket.h>
 #include <errno.h>
 
+// #define PACKET_TRACE
+
 #ifdef PACKET_TRACE
 #include <stdio.h>
 #endif
@@ -32,9 +34,13 @@ int send_pkt (struct dtp_gate* gate, const packet_t *packet) {
 			socklen);
 
 #ifdef PACKET_TRACE
-  ((packet->flags)&ACK) ?
-    (fprintf(stderr, ">>> ACK(%u)\n", packet->ack)) :
-    (fprintf(stderr, ">>> DAT(%u)\n", packet->seq)) ;
+  if((packet->flags)&ACK) {
+    fprintf(stderr, ">>> ACK(%u)\n", packet->ack);
+  } else if((packet->flags)&FIN) {
+    fprintf(stderr, ">>> FIN(%u/%u)\n", packet->seq, packet->ack);
+  } else {
+    fprintf(stderr, ">>> DAT(%u)\n", packet->seq);
+  }
   fflush(stderr);
 #endif
 
@@ -57,9 +63,13 @@ int recv_pkt (struct dtp_gate* gate, packet_t *packet) {
   }
 
 #ifdef PACKET_TRACE
-  ((packet->flags)&ACK) ?
-    (fprintf(stderr, "<<< ACK(%u)\n", packet->ack)) :
-    (fprintf(stderr, "<<< DAT(%u)\n", packet->seq)) ;
+  if((packet->flags)&ACK) {
+    fprintf(stderr, "<<< ACK(%u)\n", packet->ack);
+  } else if((packet->flags)&FIN) {
+    fprintf(stderr, "<<< FIN(%u/%u)\n", packet->seq, packet->ack);
+  } else {
+    fprintf(stderr, "<<< DAT(%u)\n", packet->seq);
+  }
   fflush(stderr);
 #endif
 

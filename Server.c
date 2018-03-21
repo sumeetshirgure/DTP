@@ -56,18 +56,11 @@ int main (int argc, char *argv[]) {
     fflush(stdout);
   }
 
-  if( dtp_send(&server, &filesize, sizeof(size_t)) != 0 ) {
-    fprintf(stderr, "Error in dtp_send.\n");
-    return 1;
-  }
-
   printf("\nOutfile received.\n");
 
   fclose(outfile);
 
   close_dtp_gate(&server);
-
-  sleep(1);
 
   return 0;
 }
