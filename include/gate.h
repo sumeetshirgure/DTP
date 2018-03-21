@@ -25,8 +25,8 @@ struct dtp_gate {
 
   /* Connection state. */
   struct timeval ackstamp;	/* Timestamp. */
-  pthread_mutex_t tm_mtx;	/* Timestamp mutex guard. */
-  pthread_cond_t tm_cv;		/* Timestamp semaphore. */
+  pthread_cond_t tm_cv;		/* Timestamp semaphore.
+				   Synched with outbuf_mtx. */
 
   /* Sequence numbers. */
   seq_t seqno, sndno;		/* Sent sequence numbers. */
@@ -53,7 +53,6 @@ struct dtp_gate {
 
   pthread_t snd_dmn;	 /* Thread handling outgoing packet I/O. */
   pthread_t rcv_dmn;	 /* Thread handling incoming packet I/O. */
-  pthread_t tmo_dmn;	 /* Thread handling timeout. */
 
   /* All daemons have the address of the gate as the pthread argument. */
 };
@@ -98,15 +97,16 @@ int dtp_connect (dtp_client*);
 /* Data transmission functions. */
 /**
    Send data through this gate (either server or client.)
+   Blocks only if buffer is full.
  */
 int dtp_send (struct dtp_gate*, const void*, size_t);
 
 /**
    Recieve data from this gate (either server or client.)
-   Waits for sender to send at least size bytes.
-   Returns once all bytes have been read.
+   Blocks until some data is available.
+   Returns once non zero amount of bytes have been read.
  */
-int dtp_recv (struct dtp_gate*, void*, size_t);
+size_t dtp_recv (struct dtp_gate*, void*, size_t);
 
 
 /* -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- */

@@ -31,10 +31,7 @@ int main (int argc, char *argv[]) {
   printf("InitSeq <Self : %u, Remote : %u>\n", server.seqno, server.ackno);
 
   size_t filesize;
-  if( dtp_recv(&server, &filesize, sizeof(size_t)) != 0 ) {
-    fprintf(stderr, "Error in dtp_recv.\n");
-    return 1;
-  }
+  dtp_recv(&server, &filesize, sizeof(size_t));
 
   printf("Received file size : %lu\n", filesize);
 
@@ -46,17 +43,13 @@ int main (int argc, char *argv[]) {
   size_t remsize = filesize;
   FILE* outfile = fopen("Outfile", "wb");
 
-  const size_t BUFLEN = 3000;
+  const size_t BUFLEN = 1200;
   char buff[BUFLEN];
   while( remsize > 0 ) {
-    size_t len = remsize;
-    if( len > BUFLEN ) len = BUFLEN;
-    if( dtp_recv(&server, buff, len) != 0 ) {
-      fprintf(stderr, "Error in dtp_recv.\n");
-      return 1;
-    }
-    fwrite(buff, 1, len, outfile);
-    remsize -= len;
+    size_t bytes = 0;
+    bytes = dtp_recv(&server, buff, (BUFLEN < remsize ? BUFLEN : remsize));
+    fwrite(buff, 1, bytes, outfile);
+    remsize -= bytes;
     printf("Bytes remaining :\t%10lu\r", remsize);
     fflush(stdout);
   }

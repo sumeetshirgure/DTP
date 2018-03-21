@@ -11,13 +11,15 @@
 #include <stdlib.h>		/* rand() */
 #include <errno.h>
 
+// #define DTP_DBG
+
 #ifdef DTP_DBG
 #include <stdio.h>
 #endif
 
 const size_t MXW = (1<<12);	/* 1 + Maximum window size. 4MiB */
-const size_t LIM = (1<<12)-1;		/* Safe limit. */
-const size_t FUTURE_WINDOW = (1<<11);	/* Maximum disorder. 1MiB */
+const size_t LIM = (1<<12)-1;	/* Safe limit. */
+const size_t FUTURE_WINDOW = (1<<10); /* Maximum disorder. 1MiB */
 
 /* Resources to allocate once a connection is established. */
 int setup_gate (struct dtp_gate* gate);
@@ -548,17 +550,22 @@ int dtp_send(struct dtp_gate* gate, const void* data, size_t len) {
 }
 
 /**
-   DTP receive function. Waits for sender to send at least size
-   bytes. Returns once all bytes have been read.
+   DTP receive function. Waits until receiver buffer has
+   at least 1 byte of data. Returns number of bytes read.
  */
-int dtp_recv(struct dtp_gate* gate, void* data, size_t size) {
-  byte_t * beg = (byte_t *) data, * end = beg + size;
-  while( beg != end ) {
-    pthread_mutex_lock(&(gate->inbuf_mtx));
-    while( gate->ibufsize == 0 ) /* TODO : Add TCP recv() specific blocking. */
-      pthread_cond_wait(&(gate->inbuf_var), &(gate->inbuf_mtx));
+size_t dtp_recv(struct dtp_gate* gate, void* data, size_t maxsize) {
+  byte_t * beg = (byte_t *) data;
+  size_t bytes_read = 0;
+  pthread_mutex_lock(&(gate->inbuf_mtx));
+
+  /* Block until receiver buffer is nonempty. */
+  while( gate->ibufsize == 0 )
+    pthread_cond_wait(&(gate->inbuf_var), &(gate->inbuf_mtx));
+
+  while( maxsize > 0 && gate->ibufsize > 0 ) {
     packet_t *pkt = (gate->inbuf) + (gate->inbeg);
-    size_t wr_len = end - beg, rem = (pkt->len - gate->byte_offset);
+    size_t wr_len = maxsize,
+      rem = (pkt->len - gate->byte_offset);
     if( wr_len >= rem ) {
       wr_len = rem;
       /* Write packet data. */
@@ -573,7 +580,10 @@ int dtp_recv(struct dtp_gate* gate, void* data, size_t size) {
       gate->byte_offset += wr_len;
     }
     beg += wr_len;
-    pthread_mutex_unlock(&(gate->inbuf_mtx));
+    bytes_read += wr_len;
+    maxsize -= wr_len;
   }
-  return 0;
+
+  pthread_mutex_unlock(&(gate->inbuf_mtx));
+  return bytes_read;
 }
