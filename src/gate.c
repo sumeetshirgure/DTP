@@ -305,7 +305,7 @@ static void * receiver_daemon (void * arg) {
     }
 
     /* Reset timeout. */
-    pthread_cond_signal(&(gate->tm_cv));
+    pthread_cond_broadcast(&(gate->tm_cv));
 
     /* Acknowledgement. */
     if( packet.flags & ACK ) {
@@ -398,7 +398,7 @@ static void * receiver_daemon (void * arg) {
 
       size_t wpt = packet.wptr;
 
-      if( (packet.wptr + MXW - gate->inbeg)%MXW < FUTURE_WINDOW
+      if( (packet.wptr + MXW - gate->inend)%MXW < FUTURE_WINDOW
 	  && gate->rcvf[packet.wptr] == 0
 	  && gate->ibufsize < LIM ) { /* Ack only if receiver buffer is nonfull. */
 

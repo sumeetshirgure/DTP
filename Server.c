@@ -46,7 +46,7 @@ int main (int argc, char *argv[]) {
   size_t remsize = filesize;
   FILE* outfile = fopen("Outfile", "wb");
 
-  const size_t BUFLEN = 1<<16;
+  const size_t BUFLEN = 3000;
   char buff[BUFLEN];
   while( remsize > 0 ) {
     size_t len = remsize;
