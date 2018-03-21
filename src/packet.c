@@ -6,8 +6,6 @@
 #include <sys/socket.h>
 #include <errno.h>
 
-// #define PACKET_TRACE
-
 #ifdef PACKET_TRACE
 #include <stdio.h>
 #endif

@@ -11,6 +11,13 @@
 
 #define IDLE 0x01
 #define CONN 0x02
+#define FINS 0x03
+#define FINR 0x04
+
+/* Window constants. */
+#define MXW (1<<12)		/* 1 + Maximum window size. 4MiB */
+#define LIM (MXW-1)		/* Safe limit. */
+#define FUTURE_WINDOW (MXW>>2)	/* Maximum disorder. 1MiB */
 
 /**
   dtp_server and dtp_client (also called "gates")
@@ -115,5 +122,20 @@ size_t dtp_recv (struct dtp_gate*, void*, size_t);
    Close connection.
  */
 int close_dtp_gate(struct dtp_gate*);
+
+
+/* -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- */
+
+/**
+   Sender thread code.
+ */
+void * sender_daemon (void *);
+
+/**
+   Receiver thread code.
+ */
+void * receiver_daemon (void *);
+
+/* -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- -*- */
 
 #endif

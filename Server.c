@@ -4,6 +4,8 @@
 
 #include <string.h>
 
+#include <unistd.h>
+
 int main (int argc, char *argv[]) {
   if( argc != 2 ) {
     fprintf(stderr, "Usage: %s <server_port>\n", argv[0]);
