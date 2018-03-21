@@ -1,0 +1,5 @@
+*.ppt*
+lib/*
+server
+client
+TODO

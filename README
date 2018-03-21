@@ -1,0 +1,77 @@
+DTP : Datagram transmission protocol.
+The library is intended only for GNU / Linux.
+
+Generating executables :
+Use GNU make :
+`$ make dtp # Creates shared object library.`
+`$ make server client # Creates test programs for server and client sides.`
+
+# If `make dtp` fails, try upgrading your kernel / GNU make.
+
+Test operation :
+*** Server side ***
+$ ./server <port_no>
+
+*** Client side ***
+$ ./client <server_ip> <server_port> <filename>
+
+DTP is a connection oriented protocol between two hosts.
+
+The server and client must both create so called "gates"
+to communicate, by making corresponding objects and then
+calling init_dtp_server / client on these objects.
+See include/gate.h for more details about the API.
+
+While creating a dtp_server(), the port number must be provided
+on which the server listens.
+While creating a dtp_client(), the port number and the IP address
+must be provided of the server to which the client wants to connect.
+
+Once gates are created, the server must call dtp_listen()
+while the client must call dtp_connect() to establish a connection.
+
+For simplicity of implementation, a DTP server only connects
+to one client at a time. The TCP - like variant can be
+implemented by the user if needed on top of DTP.
+If multiple connect() requests overlap, none of the clients
+receive are connected.
+
+Once the connection is established, the gates behave identically.
+At this point, the buffers and threads are initialized.
+There can be a bidirectional transfer of data.
+
+The application can then call dtp_send() / dtp_recv()
+to send / get streams of bytes.
+The dtp_send() call blocks only if the buffer of packets is full.
+The dtp_recv() waits for at least one byte to be available on
+the receiver buffer
+
+The buffers are implemented using a large circular array
+(4MiB * 2 of data for every gate created.)
+This was tested to be good enough for sending files as large as
+150MiB from LBS to wherever CIC / CSE dept server is located with an approx speed
+of 10MiB/s, even while the window size reached full capacity
+and triple duplicate ACKs were detected subsequently
+(which is suggestive of congestion within KGP.)
+To view module specific debug data / trace such as these,
+#define DTP_DEBUG / PACKET_TRACE in the corresponding files inside
+src/*.c and `make` again.
+Circular arrays were chosen over linked lists, because using
+indexed window frames allows for easily accepting
+out of order packets (upto a certain limit.)
+
+close() closes the connection by sending a FIN packet, and waiting
+for the ACK with the same sequence number.
+If the gate has already received a FIN packet, close() sends out
+another FIN packet, and destroys the gate.
+
+src/daemons.c implements sender and receiver lightweight
+processes using POSIX threads.
+They keep monitoring state information of the gate,
+and send constructed packets, reconstruct received packets as
+per the current window size.
+For synchronization and mutual exlusion, POSIX semaphores :
+`pthread_cond_t` and mutexes : `pthread_mutex_t` have been used.
+
+src/packet.c introduces helper functions for ease of construction
+and transfer of packets through the created internal socket.
