@@ -11,11 +11,9 @@
 #include <stdlib.h>		/* rand() */
 #include <errno.h>
 
-// #define DTP_DBG
-
-//#ifdef DTP_DBG
+#ifdef DTP_DBG
 #include <stdio.h>
-//#endif
+#endif
 
 const size_t MXW = (1<<12);	/* 1 + Maximum window size. 4MiB */
 const size_t LIM = (1<<12)-1;		/* Safe limit. */
@@ -253,13 +251,13 @@ static void * sender_daemon (void * arg) {
 				      &(gate->outbuf_mtx),
 				      &timeout);
 	if(stat == ETIMEDOUT) {
-	  //#ifdef DTP_DBG
-	  fprintf(stderr, "\e[38;5;196mTimeout detected <%lu, %lu, %lu> (%lu/%lu) (%lu | %lu)\n",
+#ifdef DTP_DBG
+	  fprintf(stderr, "Timeout detected <%lu, %lu, %lu> (%lu/%lu) (%lu | %lu)\n",
 		  gate->outbeg, gate->outsnd, gate->outend,
 		  gate->sndsize, gate->obufsize,
 		  gate->WND, gate->SSTH);
 	  fflush(stderr);
-	  //#endif
+#endif
 	  /* Trigger timeout. */
 	  gate->SSTH = (gate->SSTH + 1) >> 1; /* Halve ssthresh. */
 	  gate->WND = 1;		/* Set current window to 1 packet. */
@@ -300,7 +298,7 @@ static void * receiver_daemon (void * arg) {
     int dbg_stat;
     if( (dbg_stat = recv_pkt(gate, &packet)) == RCV_WRHOST ) {
 #ifdef DTP_DBG
-      fprintf(stderr, "Received packet from 3rd host.\n");
+      fprintf(stderr, "Received packet from unknown host.\n");
       fflush(stderr);
 #endif
       continue;
@@ -313,18 +311,17 @@ static void * receiver_daemon (void * arg) {
     if( packet.flags & ACK ) {
       pthread_mutex_lock(&(gate->outbuf_mtx));
       seq_t ack = packet.ack;
-      
+
 #ifdef DTP_DBG
       fprintf(stderr, "Ackrcvd outvar=<%lu, %lu, %lu> outsize=(%lu/%lu) outlim=(%lu|%lu) ((%u))\n",
 	      gate->outbeg, gate->outsnd, gate->outend,
 	      gate->sndsize, gate->obufsize,
 	      gate->WND, gate->SSTH, packet.seq);
-
       if( (gate->seqno <= gate->sndno ) ?
 	  (gate->seqno <= ack && ack <= gate->sndno) :
 	  (gate->seqno <= ack || ack <= gate->sndno) ) {
       } else {
-	fprintf(stderr, "OOOACK.\n");
+	fprintf(stderr, "Out of order ack.\n");
       }
       fflush(stderr);
 #endif
@@ -340,6 +337,7 @@ static void * receiver_daemon (void * arg) {
 	  gate->seqno = pkt->seq + pkt->len;
 	  gate->outbeg = (gate->outbeg + 1) % MXW;
 	  gate->obufsize--;
+
 	  if( gate->sndsize == 0 )
 	    gate->outsnd = gate->outbeg;
 	  else
@@ -349,13 +347,13 @@ static void * receiver_daemon (void * arg) {
 	    gate->AXW++;
 	    if( gate->AXW == gate->WND ) {
 	      gate->AXW = 0;
-	      if( gate->WND + 1 < LIM ) {
+	      if( gate->WND < LIM ) {
 		gate->WND++;	/* Additive increase. */
 		gate->SSTH++;
 	      }
 	    }
 	  } else {
-	    if( gate->WND + 1 < LIM )
+	    if( gate->WND < LIM )
 	      gate->WND++;	/* Exponential start. */
 	  }
 	  
@@ -363,26 +361,26 @@ static void * receiver_daemon (void * arg) {
 	  if( gate->WND > packet.wsz )
 	    gate->WND = packet.wsz; 
 
-	  /* Reset sent size. */
+	  /* Reset sent size. Ignore sent packets. */
 	  if( gate->WND < gate->sndsize ) {
 	    gate->outsnd = (gate->outbeg + gate->WND)%MXW;
 	    gate->sndsize = gate->WND;
 	  }
 	}
+
 	pthread_cond_broadcast(&(gate->outbuf_var));
       }
+
       /* Detect DUPACKS. */
       if( ack == gate->lstack ) {
 	gate->ackfr++;
 	if( gate->ackfr == 3 ) { /* Detect 3 DUPACKS */
-
 #ifdef DTP_DBG
 	  fprintf(stderr, "Triple DUPACK.\n");
 	  fflush(stderr);
 #endif
-	  
 	  gate->SSTH = (gate->SSTH + 1) >> 1; /* Halve ssthresh */
-	  gate->WND = 1 + gate->WND / 2;	/* Also halve WND.*/
+	  gate->WND = 1 + gate->WND / 2;      /* Also halve WND.*/
 	  gate->AXW = 0;
 	  gate->outsnd = gate->outbeg; /* Resend window. */
 	  gate->sndsize = 0;
@@ -411,18 +409,18 @@ static void * receiver_daemon (void * arg) {
 	while( gate->ibufsize < LIM &&
 	       (gate->rcvf)[(gate->inend)] == 1 ) {
 	  pkt = (gate->inbuf) + (gate->inend);
-#ifdef DTP_DBG
 	  if( gate->ackno != pkt->seq ) {
-	    fprintf(stderr, "Nope.\n");
+#ifdef DTP_DBG
+	    fprintf(stderr, "Window wrapping...\n");
 	    fflush(stderr);
-	  }
 #endif
+	    break;
+	  }
 	  gate->ackno = pkt->seq + pkt->len;
 	  gate->inend = (gate->inend + 1) % MXW;
 	  gate->ibufsize++;
 	  pthread_cond_broadcast(&(gate->inbuf_var));
 	}
-
 #ifdef DTP_DBG
 	fprintf(stderr, "Datrcvd [%lu, %lu]@%u. Expecting : %u\n",
 		gate->inbeg, gate->inend, packet.wptr, gate->ackno);
@@ -434,7 +432,7 @@ static void * receiver_daemon (void * arg) {
       packet.flags = ACK;
       packet.len = 0;
       packet.ack = gate->ackno;
-      packet.wsz = LIM - gate->ibufsize;
+      packet.wsz = MXW - gate->ibufsize; /* Receiver window size. */
       send_pkt(gate, &packet);
 
       pthread_mutex_unlock(&(gate->inbuf_mtx));
@@ -544,12 +542,6 @@ int dtp_send(struct dtp_gate* gate, const void* data, size_t len) {
     pthread_cond_broadcast(&(gate->outbuf_var));
     pthread_mutex_unlock(&(gate->outbuf_mtx));
   }
-  /* Wait for ackets. * /
-  pthread_mutex_lock(&(gate->outbuf_mtx));
-  while( gate->seqno != expseq )
-    pthread_cond_wait(&(gate->outbuf_var), &(gate->outbuf_mtx));
-  pthread_mutex_unlock(&(gate->outbuf_mtx));
-  /**/
   return 0;
 }
 
@@ -561,7 +553,7 @@ int dtp_recv(struct dtp_gate* gate, void* data, size_t size) {
   byte_t * beg = (byte_t *) data, * end = beg + size;
   while( beg != end ) {
     pthread_mutex_lock(&(gate->inbuf_mtx));
-    while( gate->ibufsize == 0 ) /* TODO : break */
+    while( gate->ibufsize == 0 ) /* TODO : Add TCP recv() specific blocking. */
       pthread_cond_wait(&(gate->inbuf_var), &(gate->inbuf_mtx));
     packet_t *pkt = (gate->inbuf) + (gate->inbeg);
     size_t wr_len = end - beg, rem = (pkt->len - gate->byte_offset);
