@@ -156,7 +156,9 @@ int dtp_listen (dtp_server * server, char *hostname, port_t *port_no) {
   server->status = CONN;
 
   char * ret = inet_ntoa((server->addr).sin_addr);
-  ssize_t buflen = strlen(ret);
+  ssize_t buflen = 0;
+  while( ('0' <= ret[buflen] && ret[buflen] <= '9') ||
+	 ret[buflen] == '.' ) buflen++; /* Get length of string. */
   memcpy(hostname, ret, buflen);
 
   *port_no = ntohs((server->addr).sin_port);
